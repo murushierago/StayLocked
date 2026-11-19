@@ -53,7 +53,7 @@ def main():
             print(line, end='', flush=True)
         if process.wait():
             raise RuntimeError('Installer compile failed. See installer-build.log.')
-    output = ROOT / 'release' / 'StayLocked-Setup-0.7.0-x64.exe'
+    output = ROOT / 'release' / 'StayLocked-Setup-0.7.1-x64.exe'
     if not output.is_file():
         raise RuntimeError('Compiler did not produce the expected setup file.')
     print(f'\nSEND THIS ONE FILE: {output}')

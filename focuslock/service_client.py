@@ -1,6 +1,7 @@
 """Desktop and bridge share the service status; neither owns the restrictions."""
 import time
 from .service_core import SERVICE_NAME
+from .branding import VERSION
 from .service_ipc import request
 
 
@@ -40,7 +41,7 @@ def service_status(start=False):
 def read_state():
     status = service_status()
     if status is None:
-        return {'state': 'SERVICE_MISSING', 'message': 'Install StayLocked 0.6.1 with its installer to enable the Windows service.'}
+        return {'state': 'SERVICE_MISSING', 'message': f'Install StayLocked {VERSION} with its installer to enable the Windows service.'}
     if status['CurrentState'] == 1:  # SERVICE_STOPPED: normal after a restart
         return {'state': 'IDLE'}
     if status['CurrentState'] != 4:
@@ -52,7 +53,7 @@ def launch_session(applications, force_running=False, websites=None, minutes=25)
     # No fallback to a user-owned worker: that would silently weaken enforcement.
     status = service_status(start=True)
     if status is None:
-        raise RuntimeError('Install StayLocked 0.6.1 using its installer, then reopen the app.')
+        raise RuntimeError(f'Install StayLocked {VERSION} using its installer, then reopen the app.')
     try:
         return request({'op': 'start', 'applications': list(applications),
                         'websites': list(websites or []), 'force_running': bool(force_running),
@@ -60,6 +61,6 @@ def launch_session(applications, force_running=False, websites=None, minutes=25)
                        status['ProcessId'], control=True)['session_id']
     except RuntimeError as exc:
         if str(exc) == 'Invalid start request.':
-            raise RuntimeError('The installed service may be an older version. Install StayLocked 0.6.1 '
+            raise RuntimeError(f'The installed service may be an older version. Install StayLocked {VERSION} '
                                'using the new installer, then reopen the app. Updating only the GUI is not enough.') from exc
         raise

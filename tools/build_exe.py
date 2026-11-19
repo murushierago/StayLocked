@@ -61,7 +61,7 @@ def main():
     if not executable.is_file():
         raise RuntimeError('Build returned without producing StayLocked.exe.')
     (executable.parent / 'READ-ME.txt').write_text(
-        'Install with StayLocked-Setup-0.7.0-x64.exe first. The Windows service is required.\n'
+        'Install with StayLocked-Setup-0.7.1-x64.exe first. The Windows service is required.\n'
         'This build folder alone is not a portable app. Share the installer.\n'
         'Click Browser setup once to connect your browser. No Python is needed.\n'
         'X hides the window to the tray. Exit interface does not stop an active session.\n'

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "StayLocked",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Website blocking synced to the StayLocked Windows service, until you restart your PC.",
   "permissions": [
     "nativeMessaging",

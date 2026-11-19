@@ -1,4 +1,4 @@
-"""Frozen, visible Windows service. Normal administrator stop/uninstall is supported."""
+"""Visible Windows service; ordinary STOP is accepted only outside a session."""
 import sys
 import threading
 import traceback
@@ -19,11 +19,22 @@ class StayLockedService(win32serviceutil.ServiceFramework):
         self.core = SessionService()
 
     def SvcStop(self):
+        if not self.core.stop_if_idle():
+            self.ReportServiceStatus(win32service.SERVICE_RUNNING)
+            return
+        self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING, waitHint=60000)
+
+    def SvcShutdown(self):
+        # Restart/shutdown is deliberately allowed during focus sessions.
         self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING, waitHint=60000)
         self.core.stop()
 
-    def SvcShutdown(self):
-        self.SvcStop()
+    def GetAcceptedControls(self):
+        controls = super().GetAcceptedControls()
+        core = getattr(self, 'core', None)
+        if core is not None and core.session_busy():
+            controls &= ~win32service.SERVICE_ACCEPT_STOP
+        return controls
 
     def SvcDoRun(self):
         threads = [threading.Thread(target=serve, args=(self.core, control), daemon=True)
@@ -31,9 +42,14 @@ class StayLockedService(win32serviceutil.ServiceFramework):
         try:
             for thread in threads:
                 thread.start()
+            last_controls = None
             while not self.core.stop_event.wait(.25):
                 if any(not thread.is_alive() for thread in threads):
                     raise RuntimeError('Service pipe listener exited unexpectedly.')
+                controls = self.GetAcceptedControls()
+                if controls != last_controls:
+                    self.ReportServiceStatus(win32service.SERVICE_RUNNING)
+                    last_controls = controls
         except Exception:
             servicemanager.LogErrorMsg(traceback.format_exc())
         finally:

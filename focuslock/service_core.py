@@ -86,6 +86,22 @@ class SessionService:
         # Only SCM STOP/SHUTDOWN calls this; there is deliberately no stop IPC verb.
         self.stop_event.set()
 
+    def session_busy(self):
+        with self.lock:
+            return self._session_busy()
+
+    def _session_busy(self):
+        return (self.data['state'] in {'STARTING', 'ACTIVE'} or
+                bool(self.thread and self.thread.is_alive()))
+
+    def stop_if_idle(self):
+        # Share the start() lock: a STOP racing with a new session cannot unlock it.
+        with self.lock:
+            if self._session_busy():
+                return False
+            self.stop_event.set()
+            return True
+
     def join(self, timeout=None):
         if self.thread:
             self.thread.join(timeout)

@@ -30,12 +30,21 @@ jobs:
         run: python tools/build_exe.py
       - name: Build installer
         run: python tools/build_installer.py --no-open
+      - name: Install, upgrade legacy permissions, exercise and uninstall
+        run: python tools/check_installer_windows.py --installer release/StayLocked-Setup-0.7.1-x64.exe
+      - name: Upload installer diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: StayLocked-installer-diagnostics
+          path: installer-checks/*.log
+          if-no-files-found: ignore
       - name: Upload Windows installer and screenshots
         uses: actions/upload-artifact@v4
         with:
-          name: StayLocked-0.7.0-Windows
+          name: StayLocked-0.7.1-Windows
           path: |
-            release/StayLocked-Setup-0.7.0-x64.exe
+            release/StayLocked-Setup-0.7.1-x64.exe
             ui-checks/*.png
           if-no-files-found: error
           compression-level: 0

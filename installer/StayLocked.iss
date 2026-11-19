@@ -1,4 +1,4 @@
-#define AppVersion "0.7.0"
+#define AppVersion "0.7.1"
 [Setup]
 AppId={{5168D3D9-DA9E-4A70-A8DD-AFAD92F0743E}
 AppName=StayLocked
@@ -35,6 +35,8 @@ UninstallAppRunningError=Restart Windows, exit StayLocked from the tray, close B
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"
 
 [Files]
+; Upgrade runs the NEW maintenance code, never an old/broken installed EXE.
+Source: "..\dist\StayLocked\service\*"; DestDir: "{tmp}\StayLocked-maintenance"; Flags: dontcopy recursesubdirs createallsubdirs
 Source: "..\dist\StayLocked\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [InstallDelete]
@@ -55,20 +57,31 @@ Filename: "{app}\setup\ExtensionSetup.exe"; Description: "Connect the browser ex
 Filename: "{app}\StayLocked.exe"; Description: "Launch StayLocked"; Flags: shellexec nowait postinstall skipifsilent
 
 [Code]
+function ServiceSetupError(Code: Integer): String;
+begin
+  if Code = 10 then
+    Result := 'A focus session is running or its state is unknown. Wait for the timer or restart Windows before updating.'
+  else if Code = 5 then
+    Result := 'Windows denied service access. Run Setup as administrator. An unrecognized service access policy may require administrator repair.'
+  else
+    Result := 'Windows service setup failed.';
+  Result := Result + ' Details: ' + ExpandConstant('{%TEMP}\StayLocked-service-setup-error.txt');
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
   ServiceExe: String;
 begin
   Result := '';
-  ServiceExe := ExpandConstant('{app}\service\StayLockedService.exe');
-  if FileExists(ServiceExe) then
+  ExtractTemporaryFiles('{tmp}\StayLocked-maintenance\*');
+  ServiceExe := ExpandConstant('{tmp}\StayLocked-maintenance\StayLockedService.exe');
   begin
-    if not Exec(ServiceExe, '--prepare-upgrade', ExpandConstant('{app}'),
+    if not Exec(ServiceExe, '--prepare-upgrade --quiet', ExtractFileDir(ServiceExe),
       SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-      Result := 'Could not check the existing service. Restart Windows and retry.'
+      Result := 'Could not run the bundled service maintenance helper.'
     else if ResultCode <> 0 then
-      Result := 'The service cannot be updated now. Restart Windows and retry.';
+      Result := ServiceSetupError(ResultCode);
   end;
 end;
 
@@ -80,7 +93,7 @@ begin
   Result := True;
   ServiceExe := ExpandConstant('{app}\service\StayLockedService.exe');
   if FileExists(ServiceExe) then
-    Result := Exec(ServiceExe, '--remove', ExpandConstant('{app}'),
+    Result := Exec(ServiceExe, '--remove --quiet', ExpandConstant('{app}'),
       SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
   if not Result then
     MsgBox('Could not stop/remove the Windows service. Restart Windows and retry.', mbError, MB_OK);
@@ -92,11 +105,11 @@ var
 begin
   if CurStep = ssPostInstall then
   begin
-    if not Exec(ExpandConstant('{app}\service\StayLockedService.exe'), '--install',
+    if not Exec(ExpandConstant('{app}\service\StayLockedService.exe'), '--install --quiet',
       ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) then
       RaiseException('Could not install the StayLocked Windows service.')
     else if ResultCode <> 0 then
-      RaiseException('Windows service registration failed. Installation is incomplete.');
+      RaiseException(ServiceSetupError(ResultCode));
     if not ExecAsOriginalUser(ExpandConstant('{app}\setup\ExtensionSetup.exe'), '--register',
       ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) then
       MsgBox('Browser connection setup could not start. Open Browser extension in StayLocked to repair it.', mbError, MB_OK)

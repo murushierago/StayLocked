@@ -1,8 +1,8 @@
-"""Opt-in Windows integration check against an INSTALLED 0.6.1 service.
+"""Opt-in Windows integration check against an INSTALLED 0.7.1 service.
 
 Default: read-only status. --exercise: lock one disposable copy of where.exe,
 close its requesting process, verify the lock, wait for its one-minute timer,
-then verify unlock. Administrator SCM stop is used only for failed-test cleanup.
+then verify unlock. Failed-test cleanup waits for the disposable timed session to end.
 Never uses your configured blacklist.
 """
 import argparse
@@ -63,6 +63,35 @@ def exercise():
                 pass
             else:
                 raise AssertionError('File was readable after the requesting process exited.')
+            # Service-manager Stop (including Task Manager's Services tab) must
+            # be unavailable during a session, while shutdown remains accepted.
+            manager = s.OpenSCManager(None, None, s.SC_MANAGER_CONNECT)
+            service = s.OpenService(manager, SERVICE_NAME, s.SERVICE_STOP | s.SERVICE_QUERY_STATUS)
+            try:
+                until = time.monotonic() + 5
+                while s.QueryServiceStatus(service)[2] & s.SERVICE_ACCEPT_STOP:
+                    if time.monotonic() >= until:
+                        raise AssertionError('Active service still advertises STOP')
+                    time.sleep(.1)
+                assert s.QueryServiceStatus(service)[2] & s.SERVICE_ACCEPT_SHUTDOWN
+                import pywintypes
+                try:
+                    s.ControlService(service, s.SERVICE_CONTROL_STOP)
+                except pywintypes.error as exc:
+                    assert exc.winerror == 1061, exc
+                else:
+                    raise AssertionError('SCM accepted STOP during an active session')
+                assert client.read_state()['session_id'] == requested
+                assert client.read_state()['state'] == 'ACTIVE'
+            finally:
+                s.CloseServiceHandle(service)
+                s.CloseServiceHandle(manager)
+            service_exe = Path(os.environ['ProgramFiles']) / 'StayLocked' / 'service' / 'StayLockedService.exe'
+            for operation in ('--prepare-upgrade', '--remove'):
+                result = subprocess.run([str(service_exe), operation, '--quiet'], timeout=15)
+                assert result.returncode == 10, (operation, result.returncode)
+                assert client.read_state()['state'] == 'ACTIVE'
+            print('PASS: SCM STOP and maintenance refused during focus; shutdown remains accepted.', flush=True)
             # Status API remains available while enforcement owns the file.
             for _ in range(3):
                 assert client.read_state()['session_id'] == requested
@@ -71,20 +100,23 @@ def exercise():
             ended = wait_state('ENDED', timeout=80)
             assert ended['session_id'] == requested
             assert probe.read_bytes() == original
+            manager = s.OpenSCManager(None, None, s.SC_MANAGER_CONNECT)
+            service = s.OpenService(manager, SERVICE_NAME, s.SERVICE_QUERY_STATUS)
+            try:
+                until = time.monotonic() + 5
+                while not s.QueryServiceStatus(service)[2] & s.SERVICE_ACCEPT_STOP:
+                    if time.monotonic() >= until:
+                        raise AssertionError('Idle service did not restore STOP')
+                    time.sleep(.1)
+            finally:
+                s.CloseServiceHandle(service)
+                s.CloseServiceHandle(manager)
             print('PASS: service timer released the lock without the requester; executable bytes are unchanged.')
         finally:
             current = client.read_state()
-            if requested and current.get('session_id') == requested and current['state'] in {'STARTING', 'ACTIVE'}:
-                manager = s.OpenSCManager(None, None, s.SC_MANAGER_CONNECT)
-                try:
-                    service = s.OpenService(manager, SERVICE_NAME, s.SERVICE_STOP | s.SERVICE_QUERY_STATUS)
-                    try:
-                        from focuslock.service_admin import stop_service
-                        stop_service(service)
-                    finally:
-                        s.CloseServiceHandle(service)
-                finally:
-                    s.CloseServiceHandle(manager)
+            if requested and current.get('session_id') == requested and current['state'] in {'STARTING','ACTIVE'}:
+                print('Waiting for this test session to expire before cleanup...', flush=True)
+                wait_state('ENDED', timeout=80)
             elif current['state'] in {'STARTING','ACTIVE'}:
                 raise RuntimeError('Session identity changed; test will not stop an unrelated session. Restart Windows to clean up.')
         assert probe.read_bytes() == original
@@ -96,7 +128,7 @@ def main():
     parser.add_argument('--exercise', action='store_true')
     args = parser.parse_args()
     if sys.platform != 'win32':
-        raise RuntimeError('Run this check on Windows after installing StayLocked 0.6.1.')
+        raise RuntimeError('Run this check on Windows after installing StayLocked 0.7.1.')
     if args.exercise:
         exercise()
     else:

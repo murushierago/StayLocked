@@ -1,4 +1,4 @@
-# How StayLocked 0.7.0 works
+# How StayLocked 0.7.1 works
 
 The UI is an editor/client. The Windows service owns the actual OS resources. The extension asks a separate native messaging bridge for status. Keeping these lifetimes separate means closing the UI cannot run cleanup for the service.
 
@@ -45,11 +45,11 @@ The extension redirects selected HTTP(S) domains/subdomains and blocks their sub
 
 `AppIcons` reads executable icon resources without launching the executable. Its 32-bit Windows DIB path releases icons, bitmaps and device contexts in a finally block. Icons are cached by path, size and card background; missing or malformed resources fall back to an offline monogram. A Windows-only test checks native rendering and GDI resource lifetime.
 
-The project remains Python/Tkinter with Pillow, pystray and the existing pywin32 dependency. Windows service/pipe enforcement, browser identity, config location and protocol are unchanged by the interface update.
+The project remains Python/Tkinter with Pillow, pystray and the existing pywin32 dependency. The 0.7.0 interface update preserves browser identity, config location and protocol. In 0.7.1, normal SCM STOP is accepted only while idle; shutdown remains accepted during sessions.
 
 ## Owner control
 
-A visible, normally stoppable LocalSystem service is stronger separation than a user-owned worker. It is not an unkillable process. Elevated admins can stop/terminate/delete it; no Task Manager disabling, protected/critical process flags, automatic resurrection or Safe Mode interference is used. The installer never registers service code from a user-writable folder. Windows IP filters and shared executable locks can affect other logged-in users, which the Start confirmation discloses.
+A visible LocalSystem service separates enforcement from the desktop window. Ordinary SCM STOP is temporarily unavailable while a session is preparing/active/cleaning up and returns when idle. stop_if_idle shares the start lock; shutdown bypasses this idle-only guard. It is not an unkillable process. Elevated admins can still terminate its process; idle maintenance can stop/remove it; no Task Manager disabling, protected/critical process flags, automatic resurrection or Safe Mode interference is used. The installer never registers service code from a user-writable folder. Windows IP filters and shared executable locks can affect other logged-in users, which the Start confirmation discloses.
 
 ## Primary references
 
@@ -60,3 +60,9 @@ A visible, normally stoppable LocalSystem service is stronger separation than a 
 - https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/ — signing requirement for permanent distribution.
 - https://extensionworkshop.com/documentation/develop/firefox-builtin-data-consent/ — Firefox 140+ declaration, no external collection/transmission.
 - https://jrsoftware.org/ishelp/topic_isxfunc_execasoriginaluser.htm — current-user browser registration from an elevated installer.
+
+## 0.7.1 installation maintenance
+
+Setup runs a newly extracted maintenance bundle for --prepare-upgrade, rather than executing an old installed helper. SCM/service handles use phase-specific rights. Known legacy BA ACEs containing exactly all service rights except STOP are migrated narrowly after verifying the session is idle. Any deny or unrecognized policy is left intact. Only DACL_SECURITY_INFORMATION is written, preserving auditing/ownership.
+
+--install and --remove require the installed Program Files path, and --install retains the existing on-disk ACL/junction checks. --prepare-upgrade is allowed from the newly extracted bundle but requires an elevated administrator and never registers temporary/user-writable service code. See VERIFICATION-0.7.1.md for the compiled Windows install/upgrade/session/uninstall smoke check.
