@@ -181,6 +181,27 @@ def apply_theme(root, name='Midnight', appearance=None):
 
 def size_window(root, width, height, minimum=(940, 660)):
     scale = getattr(root, 'focuslock_scale', 1)
-    max_width, max_height = root.winfo_screenwidth() - 40, root.winfo_screenheight() - 80
+    left, top = 0, 0
+    work_width, work_height = root.winfo_screenwidth(), root.winfo_screenheight()
+    frame_width, frame_height = 0, 30
+    import sys
+    if sys.platform == 'win32':
+        import ctypes
+        from ctypes import wintypes
+        area = wintypes.RECT()
+        user = ctypes.windll.user32
+        if user.SystemParametersInfoW(0x30, 0, ctypes.byref(area), 0):  # SPI_GETWORKAREA
+            left, top = area.left, area.top
+            work_width, work_height = area.right - area.left, area.bottom - area.top
+        padded = user.GetSystemMetrics(92)  # SM_CXPADDEDBORDER
+        frame_width = 2 * (user.GetSystemMetrics(32) + padded)
+        frame_height = 2 * (user.GetSystemMetrics(33) + padded) + user.GetSystemMetrics(4)
+    # Leave room for decorations and taskbars. Explicit positioning also prevents
+    # Windows' default cascading placement from putting controls off screen.
+    max_width = max(1, work_width - frame_width - 24)
+    max_height = max(1, work_height - frame_height - 24)
     root.minsize(min(round(minimum[0] * scale), max_width), min(round(minimum[1] * scale), max_height))
-    root.geometry(f'{min(round(width * scale), max_width)}x{min(round(height * scale), max_height)}')
+    width, height = min(round(width * scale), max_width), min(round(height * scale), max_height)
+    x = left + max(0, (work_width - width - frame_width) // 2)
+    y = top + max(0, (work_height - height - frame_height) // 2)
+    root.geometry(f'{width}x{height}+{x}+{y}')

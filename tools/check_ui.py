@@ -31,6 +31,10 @@ def descendants(widget):
 def check_layout(root):
     root.update()
     failures = []
+    if root.winfo_viewable():
+        x, y = root.winfo_rootx(), root.winfo_rooty()
+        if x < 0 or y < 0 or x + root.winfo_width() > root.winfo_screenwidth() or y + root.winfo_height() > root.winfo_screenheight():
+            failures.append('Window extends beyond the visible screen')
     for widget in descendants(root):
         if not widget.winfo_viewable() or widget.winfo_class() not in ('TButton', 'TLabel', 'TCombobox', 'TCheckbutton'):
             continue
