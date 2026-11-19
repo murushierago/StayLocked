@@ -115,7 +115,8 @@ class TimerRing(tk.Canvas):
         w, h = max(1, self.winfo_width()), max(1, self.winfo_height())
         ring = root.staylocked_appearance.get('timer_style', 'Ring') == 'Ring'
         diameter = min(w - 16 * self.scale, h - 8 * self.scale, 264 * self.scale)
-        if ring and diameter >= 110 * self.scale:
+        show_ring = ring and diameter >= 110 * self.scale
+        if show_ring:
             x, y = (w - diameter) / 2, (h - diameter) / 2
             width = max(4, round(7 * self.scale))
             self.create_oval(x, y, x + diameter, y + diameter, outline=c['border'], width=width)
@@ -128,15 +129,21 @@ class TimerRing(tk.Canvas):
         if text == '--:--:--':
             text = '--:--'
         # Long (hour+) sessions still fit in the ring and at the minimum window size.
-        max_width = max(80, diameter * .81 if ring else w - 20 * self.scale)
+        label_width = min(w - 16 * self.scale, diameter * .8) if show_ring else w - 16 * self.scale
+        max_width = max(1, label_width - 6 * self.scale)
         face = root.focuslock_fonts['timer']
         requested = max(24, min(54, diameter / self.scale * .205))
         size = min(requested, requested * max_width / max(1, face.measure(text)) * 48 / requested)
-        self._clock_font = (face.actual('family'), -max(20, round(size * self.scale)), 'bold')
+        pixels = max(12, round(size * self.scale))
+        self._clock_font = (face.actual('family'), -pixels, 'bold')
+        # Check the actual target-platform font metrics, including long sessions.
+        measured = int(root.tk.call('font', 'measure', self._clock_font, text))
+        if measured > max_width:
+            pixels = max(10, int(pixels * max_width / measured))
+            self._clock_font = (face.actual('family'), -pixels, 'bold')
         self.label.configure(text=text, font=self._clock_font)
         label_height = min(h, round(66 * self.scale))
-        label_width = min(w - 16 * self.scale, diameter * .8) if ring else w - 16 * self.scale
-        self.label.place(relx=.5, rely=.46, anchor='center', width=max(1, round(label_width)), height=label_height)
+        self.label.place(relx=.5, rely=.5 if h < 100 * self.scale else .46, anchor='center', width=max(1, round(label_width)), height=label_height)
         self.caption_label.configure(text='ELAPSED' if self.caption.get() == 'TIME IN FOCUS' else 'REMAINING')
         if h >= 90 * self.scale:
             self.caption_label.place(relx=.5, rely=.46, y=round(40 * self.scale), anchor='center')
