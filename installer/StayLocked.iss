@@ -1,4 +1,4 @@
-#define AppVersion "0.6.1"
+#define AppVersion "0.7.0"
 [Setup]
 AppId={{5168D3D9-DA9E-4A70-A8DD-AFAD92F0743E}
 AppName=StayLocked

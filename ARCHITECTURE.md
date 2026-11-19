@@ -1,4 +1,4 @@
-# How StayLocked 0.6.1 works
+# How StayLocked 0.7.0 works
 
 The UI is an editor/client. The Windows service owns the actual OS resources. The extension asks a separate native messaging bridge for status. Keeping these lifetimes separate means closing the UI cannot run cleanup for the service.
 
@@ -37,9 +37,15 @@ The extension redirects selected HTTP(S) domains/subdomains and blocks their sub
 
 ## Interface and saved data
 
-Row highlight (`Treeview.selection`) and a Use switch are separate states. Clicking blank space clears only the highlight. Clicking `×` passes that row explicitly to the remove method; it does not accidentally delete another selected row. Busy checks prevent list edits after start. Window close still hides to tray, even though the duplicate Hide to tray button is gone.
+`TargetList` renders native labels, checkbuttons and remove buttons inside a scrollable canvas. It preserves the old stable selection API, but switches remain independent from row highlighting. Visible row IDs are the original model indices, even under search. Refresh preserves selected app paths / domains, so deleting an earlier row cannot silently select a different target. The controller rejects edits while busy, and the native switch/remove controls are disabled as well.
 
-Themes remain in appearance.json; config.json keeps schema 3. The four palettes, rounded surfaces, app discovery and brand assets are unchanged. Discovery reads process paths, known app locations, App Paths and Start menu/Desktop shortcut metadata. It does not launch shortcuts. The project stays Python/Tkinter; pywin32 adds native Windows service/pipe APIs, preserving the existing enforcement code.
+`TimerRing` paints progress from the existing service snapshot. It never counts down, changes a deadline or becomes a heartbeat. Its native text labels show MM:SS, or HH:MM:SS for longer sessions. The saved Minimal variant uses the same text without a ring. Window close still hides to tray; exit still only stops the interface.
+
+`appearance.json` now stores theme, accent, density and timer_style. Existing theme-only files migrate with defaults for the new fields. Cosmetic writes use the existing atomic writer and never touch config.json (schema 3), session state or browser policy. Preview updates shared ttk styles and custom surfaces; Apply persists it, while Cancel restores the original palette. Light accent text/strokes are adjusted for contrast on light surfaces. Browser setup reads the same appearance preferences.
+
+`AppIcons` reads executable icon resources without launching the executable. Its 32-bit Windows DIB path releases icons, bitmaps and device contexts in a finally block. Icons are cached by path, size and card background; missing or malformed resources fall back to an offline monogram. A Windows-only test checks native rendering and GDI resource lifetime.
+
+The project remains Python/Tkinter with Pillow, pystray and the existing pywin32 dependency. Windows service/pipe enforcement, browser identity, config location and protocol are unchanged by the interface update.
 
 ## Owner control
 

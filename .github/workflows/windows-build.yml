@@ -1,0 +1,42 @@
+name: Windows build and checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements-build.txt
+      - name: Unit and native Windows icon checks
+        run: python -m unittest discover -s tests -v
+      - name: Native Tk layout and interaction checks
+        run: python tools/check_ui.py --screenshots ui-checks
+      - name: Build desktop, bridge, browser setup and service
+        run: python tools/build_exe.py
+      - name: Build installer
+        run: python tools/build_installer.py --no-open
+      - name: Upload Windows installer and screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: StayLocked-0.7.0-Windows
+          path: |
+            release/StayLocked-Setup-0.7.0-x64.exe
+            ui-checks/*.png
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

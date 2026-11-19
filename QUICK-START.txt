@@ -1,9 +1,9 @@
-StayLocked 0.6.1 - timer restored and service IPC fix
+StayLocked 0.7.0 - new interface and appearance customization
 
 BUILD AND INSTALL
 1. Restart Windows to finish any old session. Close the old interface and browsers.
 2. Extract into a fresh folder. Run Build-Installer.cmd.
-3. Run release\StayLocked-Setup-0.6.1-x64.exe and accept UAC.
+3. Run release\StayLocked-Setup-0.7.0-x64.exe and accept UAC.
 4. Open the installed StayLocked from Start. Click Browser setup.
 The build computer needs Python x64 (3.12–3.14) and Inno Setup 6.3+ or 7.
 The recipient needs only the installer. A loose EXE cannot update the service.
@@ -29,4 +29,9 @@ The service is visible as StayLocked Focus Service / StayLockedService.exe.
 An elevated administrator can still stop it. Task Manager and recovery stay usable.
 
 Settings remain at %LOCALAPPDATA%\FocusLock. No browser profile is reset.
-See README.md and VERIFICATION-0.6.1.md in the source archive for tests/limitations.
+See README.md and VERIFICATION-0.7.0.md in the source archive for tests/limitations.
+
+APPEARANCE
+Use Customize for themes, accent colors, list spacing and ring/minimal timer.
+Apply saves your choices; Cancel restores the previous appearance.
+Search app/site lists with Ctrl+F. Space toggles selected rows; Delete removes them.

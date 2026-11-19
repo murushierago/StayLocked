@@ -32,7 +32,7 @@ def check_layout(root):
     root.update()
     failures = []
     for widget in descendants(root):
-        if not widget.winfo_ismapped() or widget.winfo_class() not in ('TButton', 'TLabel', 'TCombobox'):
+        if not widget.winfo_viewable() or widget.winfo_class() not in ('TButton', 'TLabel', 'TCombobox', 'TCheckbutton'):
             continue
         name = str(widget.cget('text')) if 'text' in widget.keys() else widget.winfo_class()
         if widget.winfo_height() + 1 < widget.winfo_reqheight():
@@ -42,9 +42,14 @@ def check_layout(root):
         parent = widget.master
         while parent:
             x, y = widget.winfo_rootx() - parent.winfo_rootx(), widget.winfo_rooty() - parent.winfo_rooty()
-            if (x < -1 or y < -1 or x + widget.winfo_width() > parent.winfo_width() + 1 or
-                    y + widget.winfo_height() > parent.winfo_height() + 1):
+            # Row labels legitimately leave the vertical viewport when scrolling.
+            # Still check their native row geometry and horizontal clipping.
+            scrolling = parent.winfo_class() == 'Canvas' and bool(parent.cget('scrollregion'))
+            if (x < -1 or x + widget.winfo_width() > parent.winfo_width() + 1 or
+                    (not scrolling and (y < -1 or y + widget.winfo_height() > parent.winfo_height() + 1))):
                 failures.append(f'{name}: clipped by {parent.winfo_class()}')
+                break
+            if scrolling:
                 break
             if parent is root:
                 break
@@ -99,11 +104,11 @@ def check_desktop(output):
             root.geometry(f'{round(980 * scale)}x{round(660 * scale)}')
             check_layout(root)
             assert app.timer.get() == '00:25:00'
-            assert app.status_text.winfo_height() >= root.focuslock_fonts['body'].metrics('linespace') * 3
+            assert app.status_text.winfo_height() >= root.focuslock_fonts['small'].metrics('linespace') * 3
             # Independent metric checks catch the old *Font override / tiny timer.
             assert root.focuslock_fonts['title'].metrics('linespace') >= 24 * scale
             assert app.title_label.winfo_reqheight() >= 24 * scale
-            assert app.timer_label.winfo_reqheight() >= 36 * scale
+            assert app.timer_label.winfo_reqheight() >= 20 * scale
             app.tree.selection_set('0')
             root.update()
             app.space_apps()
@@ -115,7 +120,7 @@ def check_desktop(output):
             assert apps[1] in store.load_config()['disabled_applications']
             app.tree.selection_set('0')
             root.update()
-            app.tree.event_generate('<Button-1>', x=30, y=app.tree.winfo_height()-12)
+            app.tree.canvas.event_generate('<Button-1>', x=30, y=app.tree.canvas.winfo_height()-1)
             root.update()
             assert not app.tree.selection()
             assert apps[0] in app.enabled_apps()
@@ -124,6 +129,8 @@ def check_desktop(output):
             # Delete a row using its own cross, even when another row is highlighted.
             original_apps = list(app.applications)
             app.tree.selection_set('0')
+            app.tree.see('1')
+            root.update()
             x,y,w,h = app.tree.bbox('1', 'delete')
             app.tree.event_generate('<Button-1>', x=x+w//2, y=y+h//2)
             root.update()
@@ -137,9 +144,11 @@ def check_desktop(output):
             assert 'example.com' in store.load_websites()
             app.site_list.selection_set('0')
             root.update()
-            app.site_list.event_generate('<Button-1>', x=30, y=app.site_list.winfo_height()-12)
+            app.site_list.canvas.event_generate('<Button-1>', x=30, y=app.site_list.canvas.winfo_height()-1)
             root.update()
             assert not app.site_list.selection()
+            app.site_list.see('2')
+            root.update()
             x,y,w,h = app.site_list.bbox('2', 'delete')
             app.site_list.event_generate('<Button-1>', x=x+w//2, y=y+h//2)
             root.update()
@@ -164,7 +173,7 @@ def check_desktop(output):
             assert app.timer.get() == '00:00:31'
             assert app.duration_box.instate(['disabled'])
             assert app.clock_caption.get() == 'TIME REMAINING'
-            assert app.start_button.cget('text') == 'SESSION ACTIVE'
+            assert app.start_button.cget('text') == 'Session active'
             frozen_config = store.path.read_bytes()
             app.theme_name.set('Light')
             app.change_theme()
@@ -338,6 +347,137 @@ def check_picker(output):
         close_root(root)
 
 
+def check_customization(output):
+    from focuslock.preferences import load_appearance, preference_path
+    from focuslock.theme import ACCENTS
+    apps = [r'C:\Apps\Telegram\Telegram.exe', r'C:\Apps\Discord\Discord.exe', r'C:\Apps\Steam\Steam.exe']
+    for factor in (1.0, 1.5):
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as patches:
+            store = ConfigStore(Path(directory) / 'config.json')
+            store.save(apps)
+            store.save_websites(['youtube.com', 'reddit.com', 'twitch.tv'])
+            store.save_selection([apps[1]], ['reddit.com'])
+            state = {'state': 'IDLE'}
+            tray = Mock()
+            tray.drain.return_value = []
+            patches.enter_context(patch('focuslock.ui.TrayController', return_value=tray))
+            patches.enter_context(patch('focuslock.ui.read_state', side_effect=lambda: dict(state)))
+            patches.enter_context(patch('focuslock.extension_setup.recent_connection', return_value=True))
+            # Simulate installed Windows applications; never touch real executables.
+            original_is_file = Path.is_file
+            patches.enter_context(patch.object(Path, 'is_file', autospec=True,
+                side_effect=lambda p: str(p).lower().endswith('.exe') or original_is_file(p)))
+            root = tk.Tk()
+            root.tk.call('tk', 'scaling', factor * 96 / 72)
+            callbacks = []
+            root.report_callback_exception = lambda t, v, tb: callbacks.append(str(v))
+            app = FocusLockWindow(root, store, store.load())
+            check_layout(root)
+            if factor == 1:
+                capture(root, output, 'desktop-midnight.png')
+                app.sites_tab.invoke()
+                check_layout(root)
+                capture(root, output, 'websites.png')
+                app.apps_tab.invoke()
+            # Filtering must keep original IDs, not renumber the visible rows.
+            app.apps_query.set('sTeAm')
+            root.update()
+            assert app.tree.get_children() == ('2',)
+            app.tree.rows['2']['switch'].invoke()
+            assert apps[2] in store.load_config()['disabled_applications']
+            assert apps[1] in store.load_config()['disabled_applications']
+            app.tree.rows['2']['switch'].invoke()
+            assert apps[2] not in store.load_config()['disabled_applications']
+            app.apps_query.set('no such application')
+            root.update()
+            assert app.apps_empty.winfo_viewable() and not app.tree.get_children()
+            app.apps_query.set('')
+            extra = [fr'C:\Apps\Example{i}.exe' for i in range(15)]
+            app.commit([*apps, *extra])
+            app.apps_query.set('Example12')
+            root.update()
+            assert app.tree.get_children() == ('15',)
+            app.tree.rows['15']['delete'].invoke()
+            assert extra[12] not in store.load() and len(app.applications) == 17
+            app.apps_query.set('')
+            root.update()
+            assert app.tree.scrollbar.winfo_viewable()
+            # Deleting an earlier row must not silently highlight another app.
+            app.tree.selection_set('4')
+            selected = app.tree.item('4', 'values')[2]
+            app.remove(['0'])
+            root.update()
+            assert app.tree.item(app.tree.selection()[0], 'values')[2] == selected
+            app.tree.see(app.tree.get_children()[-1])
+            root.update()
+            assert app.tree.canvas.yview()[0] > 0
+            app.sites_query.set('TWITCH')
+            app.site_list.rows['2']['switch'].invoke()
+            assert 'twitch.tv' in store.load_config()['disabled_websites']
+            app.sites_query.set('')
+            app.preset_buttons[45].invoke()
+            assert app.timer.get() == '00:45:00'
+            app.duration.set('0')
+            assert app.start_button.instate(['disabled'])
+            app.duration.set('25')
+            assert not app.start_button.instate(['disabled'])
+            # A live appearance preview cannot change an active session or lists.
+            state.update(state='ACTIVE', session_id='appearance-test', mode='timed',
+                         applications=[apps[0]], websites=['youtube.com'], elapsed_seconds=60,
+                         remaining_seconds=1440, started_ms=1000, deadline_ms=1501000)
+            app.poll()
+            frozen = store.path.read_bytes()
+            timer = app.timer.get()
+            app.open_appearance()
+            dialog = app.appearance_dialog
+            root.update()
+            check_layout(dialog)
+            for key, value in dict(theme='Light', accent='Rose', density='Compact', timer_style='Minimal').items():
+                dialog.variables[key].set(value)
+            dialog.changed()
+            root.update()
+            assert root.staylocked_palette['accent'] == ACCENTS['Rose']
+            assert root.staylocked_appearance['timer_style'] == 'Minimal'
+            assert not preference_path(store.path).exists()
+            assert app.busy and app.timer.get() == timer
+            assert store.path.read_bytes() == frozen
+            check_layout(dialog)
+            if factor == 1:
+                capture(dialog, output, 'appearance-settings.png')
+            dialog.apply()
+            saved = load_appearance(store.path)
+            assert saved == dict(theme='Light', accent='Rose', density='Compact', timer_style='Minimal')
+            assert app.tree.locked and all(b.instate(['disabled']) for b in app.preset_buttons.values())
+            check_layout(root)
+            app.open_appearance()
+            dialog = app.appearance_dialog
+            dialog.variables['theme'].set('Ocean')
+            dialog.changed()
+            dialog.cancel()
+            assert root.staylocked_theme == saved['theme']
+            assert load_appearance(store.path) == saved
+            assert app.busy and app.timer.get() == timer
+            assert store.path.read_bytes() == frozen
+            app.open_appearance()
+            dialog = app.appearance_dialog
+            dialog.reset()
+            assert root.staylocked_theme == 'Midnight'
+            dialog.cancel()
+            assert root.staylocked_theme == 'Light'
+            state.clear()
+            state.update(state='IDLE')
+            app.poll()
+            check_layout(root)
+            assert not callbacks, callbacks
+            close_root(root, app)
+            root = tk.Tk()
+            restored = FocusLockWindow(root, store, store.load())
+            assert restored.appearance == saved
+            assert root.staylocked_appearance['density'] == 'Compact'
+            check_layout(root)
+            close_root(root, restored)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--screenshots', type=Path)
@@ -347,7 +487,8 @@ def main():
     results = check_desktop(args.screenshots)
     check_wizard(args.screenshots)
     check_picker(args.screenshots)
-    print(json.dumps({'result': 'PASS', 'desktop': results, 'wizard': 'layout + clipboard at 100% and 150%', 'picker': 'scan queue, search, multi-select, path, add and close at 100% and 150%'}, indent=2))
+    check_customization(args.screenshots)
+    print(json.dumps({'result': 'PASS', 'customization': 'search IDs, scrolling, presets, live preview, cancel, reset, persistence and active-session isolation at 100% and 150%', 'desktop': results, 'wizard': 'layout + clipboard at 100% and 150%', 'picker': 'scan queue, search, multi-select, path, add and close at 100% and 150%'}, indent=2))
 
 
 if __name__ == '__main__':
