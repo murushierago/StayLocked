@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 
 APP_NAME = 'StayLocked'
-VERSION = '0.6.1'
+VERSION = '0.7.1'
 
 
 def asset_directory():

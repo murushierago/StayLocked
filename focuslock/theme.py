@@ -1,23 +1,66 @@
-"""Shared, high-contrast palettes with pixel-scaled fonts and rounded ttk buttons."""
+"""Shared palettes, readable pixel-scaled fonts and native rounded controls."""
 from tkinter import ttk, font
-from .preferences import THEME_NAMES
 
 PALETTES = {
-    'Midnight': dict(bg='#101218', card='#1b1e28', raised='#272b39', text='#f3f4fa', muted='#a8afc2',
-                     accent='#c2f28b', accent_text='#1b2b0e', hover='#d6ffa7', selected='#333e31',
-                     border='#323746', button='#2b3040', button_hover='#3b4359', off='#50596e'),
-    'Light': dict(bg='#f3f4f8', card='#ffffff', raised='#eef0f6', text='#202637', muted='#58627a',
-                  accent='#6550d8', accent_text='#ffffff', hover='#7561eb', selected='#e5e0fb',
-                  border='#dce0eb', button='#e5e8f1', button_hover='#d6dbea', off='#7c879c'),
-    'Violet': dict(bg='#171321', card='#231c32', raised='#302641', text='#faf4ff', muted='#c0accf',
-                   accent='#ceb2ff', accent_text='#302044', hover='#e0cfff', selected='#443457',
-                   border='#443352', button='#3b2e4e', button_hover='#503e68', off='#746183'),
-    'Ocean': dict(bg='#0b1920', card='#122831', raised='#1b3742', text='#ebfbff', muted='#9fbdc8',
-                  accent='#78dedb', accent_text='#0a3033', hover='#abf3ee', selected='#24484f',
-                  border='#2c4652', button='#233f4b', button_hover='#305464', off='#587985'),
+    'Midnight': dict(bg='#101116', card='#191b23', raised='#22252f', text='#f4f4f7', muted='#a8adbd',
+                     accent='#c3f589', accent_text='#17220e', hover='#d2faa6', selected='#2d382b',
+                     border='#303440', button='#232630', button_hover='#303540', off='#555b6b', ring='#ad8aff'),
+    'Light': dict(bg='#f2f3f7', card='#ffffff', raised='#f0f1f6', text='#202435', muted='#5d657a',
+                  accent='#6953d9', accent_text='#ffffff', hover='#7a64e7', selected='#eeeafb',
+                  border='#dce0e9', button='#e6e8f0', button_hover='#dadee9', off='#7c8496', ring='#6953d9'),
+    'Violet': dict(bg='#17131f', card='#221c2e', raised='#30263f', text='#faf4ff', muted='#bcaccb',
+                   accent='#d0b4ff', accent_text='#2a1c3d', hover='#e0cfff', selected='#413153',
+                   border='#40324e', button='#352943', button_hover='#49365e', off='#72607e', ring='#c7a0ff'),
+    'Ocean': dict(bg='#0c181e', card='#13272f', raised='#1d3540', text='#edfaff', muted='#a1bdc8',
+                  accent='#83e2da', accent_text='#0b2b30', hover='#a7f2eb', selected='#24474c',
+                  border='#2b4550', button='#203944', button_hover='#2e4e59', off='#5c7b86', ring='#83e2da'),
 }
-# Defaults only. Live widgets use palette(widget).
-BG, CARD, TEXT, MUTED, ACCENT, BORDER = (PALETTES['Midnight'][k] for k in ('bg','card','text','muted','accent','border'))
+ACCENTS = dict(Lime='#c3f589', Violet='#b79aff', Mint='#83e2c5', Blue='#88b9ff', Rose='#f5a2be', Amber='#f3ca7b')
+BG, CARD, TEXT, MUTED, ACCENT, BORDER = (PALETTES['Midnight'][k] for k in ('bg', 'card', 'text', 'muted', 'accent', 'border'))
+
+
+def blend(a, b, amount):
+    channels = lambda color: tuple(int(color[i:i + 2], 16) for i in (1, 3, 5))
+    return '#' + ''.join(f'{round(x * (1 - amount) + y * amount):02x}' for x, y in zip(channels(a), channels(b)))
+
+
+def contrasting_text(color):
+    def linear(value):
+        value = value / 255
+        return value / 12.92 if value <= .04045 else ((value + .055) / 1.055) ** 2.4
+    rgb = [linear(int(color[i:i + 2], 16)) for i in (1, 3, 5)]
+    luminance = sum(a * b for a, b in zip(rgb, (.2126, .7152, .0722)))
+    return '#12151c' if (luminance + .05) / .05 >= 1.05 / (luminance + .05) else '#ffffff'
+
+
+def contrast_ratio(first, second):
+    def luminance(color):
+        rgb = [int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        return sum(w * (v / 12.92 if v <= .04045 else ((v + .055) / 1.055) ** 2.4)
+                   for w, v in zip((.2126, .7152, .0722), rgb))
+    high, low = sorted((luminance(first), luminance(second)), reverse=True)
+    return (high + .05) / (low + .05)
+
+
+def appearance_palette(name, appearance=None):
+    c = dict(PALETTES.get(name, PALETTES['Midnight']))
+    accent = (appearance or {}).get('accent')
+    if accent in ACCENTS:
+        c['accent'] = ACCENTS[accent]
+        c['accent_text'] = contrasting_text(c['accent'])
+        c['hover'] = blend(c['accent'], '#ffffff', .18)
+        c['selected'] = blend(c['card'], c['accent'], .16)
+        c['ring'] = c['accent']
+    # A light accent remains a light button, but its text/stroke variant must
+    # remain readable on light cards and selected tabs as well.
+    c['accent_ink'] = c['accent']
+    for _ in range(20):
+        if contrast_ratio(c['accent_ink'], c['selected']) >= 4.5:
+            break
+        c['accent_ink'] = blend(c['accent_ink'], c['text'], .15)
+    if contrast_ratio(c['ring'], c['card']) < 3:
+        c['ring'] = c['accent_ink']
+    return c
 
 
 def palette(widget):
@@ -25,114 +68,140 @@ def palette(widget):
 
 
 def _rounded_buttons(root, style, c, px):
-    import tkinter as tk
     from PIL import Image, ImageDraw, ImageTk
-    for name, normal, hover, foreground in (
-        ('TButton',c['button'],c['button_hover'],c['text']),
-        ('Accent.TButton',c['accent'],c['hover'],c['accent_text']),
-        ('Card.Accent.TButton',c['accent'],c['hover'],c['accent_text']),
-        ('Tab.TButton',c['bg'],c['button'],c['muted']),
-        ('Selected.Tab.TButton',c['selected'],c['selected'],c['accent']),
-    ):
-        background = c['card'] if name.startswith('Card.') else c['bg']
+    variants = (
+        ('TButton', c['bg'], c['button'], c['button_hover'], c['text']),
+        ('Accent.TButton', c['bg'], c['accent'], c['hover'], c['accent_text']),
+        ('Tab.TButton', c['bg'], c['bg'], c['button'], c['muted']),
+        ('Selected.Tab.TButton', c['bg'], c['selected'], c['selected'], c['accent_ink']),
+        ('Card.TButton', c['card'], c['raised'], c['button_hover'], c['text']),
+        ('Card.Accent.TButton', c['card'], c['accent'], c['hover'], c['accent_text']),
+        ('Card.Chip.TButton', c['card'], c['raised'], c['button_hover'], c['muted']),
+        ('Card.Selected.Chip.TButton', c['card'], c['selected'], c['selected'], c['accent_ink']),
+        ('Card.Icon.TButton', c['card'], c['card'], c['raised'], c['muted']),
+    )
+    for name, background, normal, hover, foreground in variants:
         images = []
-        for fill in (normal,hover,c['raised']):
+        for fill in (normal, hover, c['raised']):
             n = px(32)
-            image = Image.new('RGBA',(n*3,n*3),background)
-            ImageDraw.Draw(image).rounded_rectangle((0,0,n*3-1,n*3-1),radius=px(9)*3,fill=fill)
-            images.append(ImageTk.PhotoImage(image.resize((n,n),Image.Resampling.LANCZOS),master=root))
-        element = 'StayLocked.'+name
+            image = Image.new('RGBA', (n * 3, n * 3), background)
+            draw = ImageDraw.Draw(image)
+            outlined = 'Chip.' in name
+            draw.rounded_rectangle((0, 0, n * 3 - 1, n * 3 - 1), radius=px(9) * 3,
+                                   fill=fill, outline=c['accent_ink'] if 'Selected.Chip' in name else c['border'] if outlined else fill,
+                                   width=3)
+            images.append(ImageTk.PhotoImage(image.resize((n, n), Image.Resampling.LANCZOS), master=root))
+        element = 'StayLocked.' + name
         if element not in style.element_names():
-            style.element_create(element,'image',images[0],('disabled',images[2]),('active',images[1]),
-                                 border=px(8),sticky='nsew')
+            style.element_create(element, 'image', images[0], ('disabled', images[2]), ('active', images[1]), border=px(8), sticky='nsew')
         else:
-            # Retain Tcl image names referenced by the style element.
             old = root.staylocked_button_images[name]
-            for before, after in zip(old,images):
-                root.tk.call(str(before),'copy',str(after),'-compositingrule','set')
+            for before, after in zip(old, images):
+                root.tk.call(str(before), 'copy', str(after), '-compositingrule', 'set')
             images = old
         root.staylocked_button_images[name] = images
-        style.layout(name,[(element,{'sticky':'nsew','children':[
-            ('Button.focus',{'sticky':'nsew','children':[
-                ('Button.padding',{'sticky':'nsew','children':[('Button.label',{'sticky':'nsew'})]})]})]})])
-        style.configure(name,background=background,foreground=foreground,borderwidth=0,
-                        font=root.focuslock_fonts['strong' if name!='TButton' else 'body'],
-                        padding=(px(12),px(4)),focusthickness=1,focuscolor=c['accent'])
-        style.map(name,foreground=[('disabled',c['muted'])],background=[('disabled',background),('active',background)])
+        style.layout(name, [(element, {'sticky': 'nsew', 'children': [
+            ('Button.focus', {'sticky': 'nsew', 'children': [
+                ('Button.padding', {'sticky': 'nsew', 'children': [('Button.label', {'sticky': 'nsew'})]})]})]})])
+        strong = any(value in name for value in ('Accent', 'Selected'))
+        padding = (px(10), px(5)) if 'Chip' in name or 'Icon' in name else (px(17), px(10))
+        style.configure(name, background=background, foreground=foreground, borderwidth=0,
+                        font=root.focuslock_fonts['strong' if strong else 'body'], padding=padding,
+                        focusthickness=1, focuscolor=c['accent'], width=0)
+        style.map(name, foreground=[('disabled', c['muted'])], background=[('disabled', background), ('active', background)])
 
 
-def apply_theme(root, name='Midnight'):
+def apply_theme(root, name='Midnight', appearance=None):
     name = name if name in PALETTES else 'Midnight'
-    c = PALETTES[name]
-    root.staylocked_palette, root.staylocked_theme = c, name
+    appearance = dict(appearance or getattr(root, 'staylocked_appearance', {}))
+    appearance['theme'] = name
+    c = appearance_palette(name, appearance)
+    root.staylocked_palette, root.staylocked_theme, root.staylocked_appearance = c, name, appearance
     root.configure(bg=c['bg'])
-    if not hasattr(root,'focuslock_scale'):
-        requested = float(root.tk.call('tk','scaling'))/(96/72)
-        root.focuslock_scale = max(.8,min(requested,1.75,root.winfo_screenwidth()/1120,
-                                         (root.winfo_screenheight()-80)/700))
-    px = lambda value: max(1,round(value*root.focuslock_scale))
-    if not hasattr(root,'focuslock_fonts'):
-        available = {n.lower():n for n in font.families(root)}
-        family = next((available[n] for n in ('segoe ui','dejavu sans','helvetica') if n in available),'TkDefaultFont')
-        mono = next((available[n] for n in ('consolas','dejavu sans mono','courier') if n in available),family)
-        for n in ('TkDefaultFont','TkTextFont','TkMenuFont','TkHeadingFont'):
-            font.nametofont(n,root).configure(family=family,size=-px(14))
+    if not hasattr(root, 'focuslock_scale'):
+        requested = float(root.tk.call('tk', 'scaling')) / (96 / 72)
+        root.focuslock_scale = max(.75, min(requested, 1.75, root.winfo_screenwidth() / 1160,
+                                           (root.winfo_screenheight() - 80) / 730))
+    px = lambda value: max(1, round(value * root.focuslock_scale))
+    if not hasattr(root, 'focuslock_fonts'):
+        available = {n.lower(): n for n in font.families(root)}
+        family = next((available[n] for n in ('segoe ui', 'inter', 'dejavu sans', 'helvetica') if n in available), 'TkDefaultFont')
+        mono = next((available[n] for n in ('consolas', 'dejavu sans mono', 'courier') if n in available), family)
+        for n in ('TkDefaultFont', 'TkTextFont', 'TkMenuFont', 'TkHeadingFont'):
+            font.nametofont(n, root).configure(family=family, size=-px(14))
         root.focuslock_fonts = {
-            n:font.Font(root=root,family=face,size=-px(size),weight=weight)
-            for n,size,weight,face in (
-                ('body',14,'normal',family),('small',12,'normal',family),('strong',14,'bold',family),
-                ('heading',19,'bold',family),('title',30,'bold',family),('timer',43,'bold',mono))}
+            n: font.Font(root=root, family=face, size=-px(size), weight=weight)
+            for n, size, weight, face in (
+                ('body', 14, 'normal', family), ('small', 12, 'normal', family), ('strong', 14, 'bold', family),
+                ('heading', 23, 'bold', family), ('title', 29, 'bold', family), ('timer', 48, 'bold', mono))}
         root.staylocked_button_images = {}
     f = root.focuslock_fonts
-    for key,value in (('background',c['card']),('foreground',c['text']),
-                      ('selectBackground',c['selected']),('selectForeground',c['text'])):
-        root.option_add('*TCombobox*Listbox.'+key,value)
+    for key, value in (('background', c['card']), ('foreground', c['text']), ('selectBackground', c['selected']), ('selectForeground', c['text'])):
+        root.option_add('*TCombobox*Listbox.' + key, value)
     s = ttk.Style(root)
-    if s.theme_use()!='clam':
+    if s.theme_use() != 'clam':
         s.theme_use('clam')
-    s.configure('.',background=c['bg'],foreground=c['text'],font=f['body'])
-    for prefix,bg in (('',c['bg']),('Card.',c['card']),('Raised.',c['raised'])):
-        s.configure(prefix+'TFrame',background=bg)
-        s.configure(prefix+'TLabel',background=bg,foreground=c['text'],font=f['body'])
-    for name,fg,bg,face in (
-        ('Title',c['text'],c['bg'],'title'),('Heading',c['text'],c['bg'],'heading'),
-        ('Muted',c['muted'],c['bg'],'small'),('CardMuted',c['muted'],c['card'],'small'),
-        ('CardHeading',c['text'],c['card'],'heading'),('Status',c['accent'],c['card'],'strong'),
-        ('Timer',c['text'],c['card'],'timer'),('Chip',c['accent'],c['bg'],'small')):
-        s.configure(name+'.TLabel',foreground=fg,background=bg,font=f[face])
-    _rounded_buttons(root,s,c,px)
-    s.configure('Card.Accent.TButton',background=c['card'])
-    s.map('Card.Accent.TButton',background=[('disabled',c['card']),('active',c['card'])])
-    s.configure('Treeview',background=c['card'],fieldbackground=c['card'],foreground=c['text'],
-                borderwidth=0,rowheight=px(58),font=f['body'],bordercolor=c['card'],
-                lightcolor=c['card'],darkcolor=c['card'],relief='flat',indent=0)
-    s.map('Treeview',background=[('selected',c['selected'])],foreground=[('selected',c['text'])])
-    s.layout('Treeview',[('Treeview.treearea',{'sticky':'nswe'})])
-    s.layout('Treeview.Item',[('Treeitem.padding',{'sticky':'nswe','children':[
-        ('Treeitem.image',{'side':'left','sticky':'w'}),('Treeitem.text',{'sticky':'nswe'})]})])
-    s.configure('Treeview.Heading',background=c['card'],foreground=c['muted'],font=f['small'],
-                relief='flat',borderwidth=0,padding=(px(12),px(13)))
-    s.map('Treeview.Heading',background=[('active',c['card'])])
-    s.configure('TEntry',fieldbackground=c['raised'],foreground=c['text'],insertcolor=c['text'],
-                bordercolor=c['border'],lightcolor=c['border'],darkcolor=c['border'],padding=px(9))
-    s.map('TEntry',fieldbackground=[('readonly',c['card'])],foreground=[('readonly',c['muted'])])
-    s.configure('TCombobox',fieldbackground=c['raised'],background=c['raised'],foreground=c['text'],
-                arrowcolor=c['muted'],bordercolor=c['border'],lightcolor=c['border'],darkcolor=c['border'],padding=px(8))
-    s.map('TCombobox',fieldbackground=[('readonly',c['raised']),('disabled',c['card'])],
-          foreground=[('readonly',c['text']),('disabled',c['muted'])])
-    for orientation in ('Vertical','Horizontal'):
-        s.configure(orientation+'.TScrollbar',background=c['border'],troughcolor=c['card'],
-                    borderwidth=0,arrowcolor=c['muted'],arrowsize=px(10),bordercolor=c['card'],
-                    lightcolor=c['card'],darkcolor=c['card'])
-        s.map(orientation+'.TScrollbar',background=[('active',c['off'])])
-    s.configure('Focus.Horizontal.TProgressbar',background=c['accent'],troughcolor=c['raised'],
-                borderwidth=0,lightcolor=c['accent'],darkcolor=c['accent'],thickness=px(4))
-    s.configure('TSeparator',background=c['border'])
+    s.configure('.', background=c['bg'], foreground=c['text'], font=f['body'])
+    for prefix, bg in (('', c['bg']), ('Card.', c['card']), ('Raised.', c['raised']), ('Selected.', c['selected'])):
+        s.configure(prefix + 'TFrame', background=bg)
+        s.configure(prefix + 'TLabel', background=bg, foreground=c['text'], font=f['body'])
+        s.configure(prefix + 'Muted.TLabel', background=bg, foreground=c['muted'], font=f['small'])
+        s.configure(prefix + 'Strong.TLabel', background=bg, foreground=c['text'], font=f['strong'])
+    for label, fg, bg, face in (
+        ('Title', c['text'], c['bg'], 'title'), ('Heading', c['text'], c['bg'], 'heading'),
+        ('Muted', c['muted'], c['bg'], 'small'), ('CardMuted', c['muted'], c['card'], 'small'),
+        ('CardHeading', c['text'], c['card'], 'heading'), ('Status', c['text'], c['card'], 'strong'),
+        ('Timer', c['text'], c['card'], 'timer'), ('Chip', c['accent'], c['bg'], 'small')):
+        s.configure(label + '.TLabel', foreground=fg, background=bg, font=f[face])
+    _rounded_buttons(root, s, c, px)
+    s.configure('Treeview', background=c['card'], fieldbackground=c['card'], foreground=c['text'], borderwidth=0,
+                rowheight=px(44 if appearance.get('density') == 'Compact' else 58), font=f['body'], bordercolor=c['card'],
+                lightcolor=c['card'], darkcolor=c['card'], relief='flat', indent=0)
+    s.map('Treeview', background=[('selected', c['selected'])], foreground=[('selected', c['text'])])
+    s.layout('Treeview', [('Treeview.treearea', {'sticky': 'nswe'})])
+    s.layout('Treeview.Item', [('Treeitem.padding', {'sticky': 'nswe', 'children': [
+        ('Treeitem.image', {'side': 'left', 'sticky': 'w'}), ('Treeitem.text', {'sticky': 'nswe'})]})])
+    s.configure('Treeview.Heading', background=c['card'], foreground=c['muted'], font=f['small'], relief='flat', borderwidth=0, padding=(px(12), px(12)))
+    s.map('Treeview.Heading', background=[('active', c['card'])])
+    s.configure('TEntry', fieldbackground=c['raised'], foreground=c['text'], insertcolor=c['text'],
+                bordercolor=c['border'], lightcolor=c['border'], darkcolor=c['border'], padding=px(10))
+    s.map('TEntry', fieldbackground=[('readonly', c['card'])], foreground=[('readonly', c['muted'])], bordercolor=[('focus', c['accent'])])
+    s.configure('TCombobox', fieldbackground=c['raised'], background=c['raised'], foreground=c['text'], arrowcolor=c['muted'],
+                bordercolor=c['border'], lightcolor=c['border'], darkcolor=c['border'], padding=px(8))
+    s.map('TCombobox', fieldbackground=[('readonly', c['raised']), ('disabled', c['card'])], foreground=[('readonly', c['text']), ('disabled', c['muted'])])
+    s.configure('TCheckbutton', background=c['card'], foreground=c['text'], indicatorbackground=c['raised'], indicatorforeground=c['accent'])
+    s.map('TCheckbutton', background=[('active', c['card'])], foreground=[('disabled', c['muted'])])
+    for orientation in ('Vertical', 'Horizontal'):
+        s.configure(orientation + '.TScrollbar', background=c['border'], troughcolor=c['card'], borderwidth=0,
+                    arrowcolor=c['muted'], arrowsize=px(9), bordercolor=c['card'], lightcolor=c['card'], darkcolor=c['card'])
+        s.map(orientation + '.TScrollbar', background=[('active', c['off'])])
+    s.configure('TSeparator', background=c['border'])
     return s
 
 
-def size_window(root,width,height,minimum=(940,660)):
-    scale = getattr(root,'focuslock_scale',1)
-    max_width,max_height = root.winfo_screenwidth()-40,root.winfo_screenheight()-80
-    root.minsize(min(round(minimum[0]*scale),max_width),min(round(minimum[1]*scale),max_height))
-    root.geometry(f'{min(round(width*scale),max_width)}x{min(round(height*scale),max_height)}')
+def size_window(root, width, height, minimum=(940, 660)):
+    scale = getattr(root, 'focuslock_scale', 1)
+    left, top = 0, 0
+    work_width, work_height = root.winfo_screenwidth(), root.winfo_screenheight()
+    frame_width, frame_height = 0, 30
+    import sys
+    if sys.platform == 'win32':
+        import ctypes
+        from ctypes import wintypes
+        area = wintypes.RECT()
+        user = ctypes.windll.user32
+        if user.SystemParametersInfoW(0x30, 0, ctypes.byref(area), 0):  # SPI_GETWORKAREA
+            left, top = area.left, area.top
+            work_width, work_height = area.right - area.left, area.bottom - area.top
+        padded = user.GetSystemMetrics(92)  # SM_CXPADDEDBORDER
+        frame_width = 2 * (user.GetSystemMetrics(32) + padded)
+        frame_height = 2 * (user.GetSystemMetrics(33) + padded) + user.GetSystemMetrics(4)
+    # Leave room for decorations and taskbars. Explicit positioning also prevents
+    # Windows' default cascading placement from putting controls off screen.
+    max_width = max(1, work_width - frame_width - 24)
+    max_height = max(1, work_height - frame_height - 24)
+    root.minsize(min(round(minimum[0] * scale), max_width), min(round(minimum[1] * scale), max_height))
+    width, height = min(round(width * scale), max_width), min(round(height * scale), max_height)
+    x = left + max(0, (work_width - width - frame_width) // 2)
+    y = top + max(0, (work_height - height - frame_height) // 2)
+    root.geometry(f'{width}x{height}+{x}+{y}')

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "StayLocked",
-  "version": "0.6.1",
+  "version": "0.7.1",
   "description": "Website blocking synced to the StayLocked Windows service, until you restart your PC.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApvC/5c5G/GzeDayWbano+ZHfAFby1YhcWbEeJQhfLmJEptBJOVJ1iZrJGMIi2yPLEWvkjbNzBWr/PooO/D0dezXHA8ZIhlAXDcPIazudDmDubDMFx5e23cTP2xzM8AG+Z72gGlWNDdgA58eP5/DsCUPdAk5A1wTec5V/Kc8nsFkMnkVALSkoB3UGPfqrdMZ3exmLZ0OMn57/h3ieDV5V7YWmPSaQPzRRUoGETtSW1fepR07Fc8KlT8Yb6t4ggbzTySXo8R/budEcwi8COqenzL8piQYMY3mHxok6y2qBop+/U8+f5KAJrHn4wTvyJ61Jd6u4U5ph8ucnWdMOrFKzowIDAQAB",
   "minimum_chrome_version": "120",

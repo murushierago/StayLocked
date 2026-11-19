@@ -128,11 +128,12 @@ def build_wizard(root):
     from tkinter import ttk, messagebox
     from .theme import apply_theme, size_window
     root.title('StayLocked — Browser extension')
-    from .preferences import load_theme
+    from .preferences import load_appearance
     from .branding import apply_window_icon
-    apply_theme(root, load_theme())
+    appearance = load_appearance()
+    apply_theme(root, appearance['theme'], appearance)
     apply_window_icon(root)
-    size_window(root, 760, 650, (710, 620))
+    size_window(root, 820, 740, (780, 720))
     px = lambda n: max(1, round(n * root.focuslock_scale))
     root.rowconfigure(0, weight=1)
     root.columnconfigure(0, weight=1)

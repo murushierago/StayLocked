@@ -11,208 +11,267 @@ from .website_dialog import ask_website
 from .session import format_remaining, parse_minutes
 from .service_client import launch_session, read_state
 from .theme import apply_theme, size_window, palette
-from .preferences import THEME_NAMES, load_theme, save_theme
+from .preferences import THEME_NAMES, load_appearance, save_appearance
 from .branding import VERSION, apply_window_icon, make_icon
-from .widgets import Surface, SwitchTree, ProgressLine
+from .widgets import Surface, TargetList, TimerRing, AutoScrollbar
+from .app_icons import AppIcons
 
 
 class FocusLockWindow:
     # The internal class/module name remains stable for existing integrations.
-    def __init__(self,root,store,applications):
-        self.root,self.store = root,store
-        self.applications = applications
+    def __init__(self, root, store, applications):
+        self.root, self.store, self.applications = root, store, applications
         self.websites = store.load_websites()
         selection = store.load_config()
         self.disabled_apps = {path_key(p) for p in selection['disabled_applications']}
         self.disabled_sites = set(selection['disabled_websites'])
-        self.busy,self.pending,self.display_session = True,None,None
+        self.busy, self.pending, self.display_session = True, None, None
         self._preview_after_end = False
-        self.tray,self.shutting_down,self.hidden_notice_shown = None,False,False
-        self._active_snapshot = None
-        self.service_missing = False
-        self.discovery_dialog = None
+        self.tray, self.shutting_down, self.hidden_notice_shown = None, False, False
+        self.service_missing, self.discovery_dialog, self.appearance_dialog = False, None, None
+        self._active_snapshot, self._active_sites = None, None
+        self.appearance = load_appearance(store.path)
         root.title(f'StayLocked — {VERSION}')
-        apply_theme(root,load_theme(store.path))
+        apply_theme(root, self.appearance['theme'], self.appearance)
         apply_window_icon(root)
-        size_window(root,1120,730,(980,660))
-        px = lambda n:max(1,round(n*root.focuslock_scale))
-        fonts,c = root.focuslock_fonts,palette(root)
-        root.rowconfigure(0,weight=1)
-        root.columnconfigure(0,weight=1)
-        outer = ttk.Frame(root,padding=px(24))
-        outer.grid(row=0,column=0,sticky='nsew')
-        outer.rowconfigure(1,weight=1)
-        outer.columnconfigure(0,weight=1)
+        size_window(root, 1180, 820, (980, 660))
+        self.px = lambda n: max(1, round(n * root.focuslock_scale))
+        px = self.px
+        self.icons, self.surfaces = AppIcons(root), []
+        root.rowconfigure(0, weight=1)
+        root.columnconfigure(0, weight=1)
+        outer = ttk.Frame(root, padding=px(24))
+        outer.grid(row=0, column=0, sticky='nsew')
+        outer.rowconfigure(1, weight=1)
+        outer.columnconfigure(0, weight=1)
         header = ttk.Frame(outer)
-        header.grid(row=0,column=0,sticky='ew',pady=(0,px(24)))
-        header.columnconfigure(1,weight=1)
+        header.grid(row=0, column=0, sticky='ew', pady=(0, px(25)))
+        header.columnconfigure(1, weight=1)
         from PIL import ImageTk
-        self.logo = ImageTk.PhotoImage(make_icon(px(56)),master=root)
-        ttk.Label(header,image=self.logo).grid(row=0,column=0,rowspan=2,sticky='w',padx=(0,px(12)))
-        self.title_label = ttk.Label(header,text='StayLocked',style='Title.TLabel')
-        self.title_label.grid(row=0,column=1,sticky='w')
-        ttk.Label(header,text='Less noise. More of what matters.',style='Muted.TLabel').grid(row=1,column=1,sticky='w')
-        appearance = ttk.Frame(header)
-        appearance.grid(row=0,column=2,rowspan=2,padx=px(12))
-        ttk.Label(appearance,text='APPEARANCE',style='Muted.TLabel').pack(anchor='w',pady=(0,px(3)))
-        self.theme_name = tk.StringVar(value=root.staylocked_theme)
-        self.theme_box = ttk.Combobox(appearance,textvariable=self.theme_name,values=THEME_NAMES,state='readonly',width=11)
-        self.theme_box.pack()
-        self.theme_box.bind('<<ComboboxSelected>>',self.change_theme)
-        self.extension_button = ttk.Button(header,text='Browser setup',command=self.open_extension_setup)
-        self.extension_button.grid(row=0,column=3,rowspan=2,sticky='e')
+        self.logo = ImageTk.PhotoImage(make_icon(px(58)), master=root)
+        ttk.Label(header, image=self.logo).grid(row=0, column=0, rowspan=2, padx=(0, px(13)))
+        self.title_label = ttk.Label(header, text='StayLocked', style='Title.TLabel')
+        self.title_label.grid(row=0, column=1, sticky='w')
+        ttk.Label(header, text='Less noise. More of what matters.', style='Muted.TLabel').grid(row=1, column=1, sticky='w', pady=(px(4), 0))
+        self.theme_name = tk.StringVar(value=self.appearance['theme'])
+        self.theme_box = ttk.Combobox(header, textvariable=self.theme_name, values=THEME_NAMES, state='readonly', width=11)
+        self.theme_box.grid(row=0, column=2, rowspan=2, padx=(px(12), px(8)))
+        self.theme_box.bind('<<ComboboxSelected>>', self.change_theme)
+        ttk.Button(header, text='Customize', command=self.open_appearance).grid(row=0, column=3, rowspan=2, padx=(0, px(8)))
+        self.extension_button = ttk.Button(header, text='Browser setup', command=self.open_extension_setup)
+        self.extension_button.grid(row=0, column=4, rowspan=2)
         body = ttk.Frame(outer)
-        body.grid(row=1,column=0,sticky='nsew')
-        body.rowconfigure(0,weight=1)
-        body.columnconfigure(0,weight=1)
-        editor = ttk.Frame(body)
-        editor.grid(row=0,column=0,sticky='nsew',padx=(0,px(20)))
-        editor.rowconfigure(1,weight=1)
-        editor.columnconfigure(0,weight=1)
-        tabs = ttk.Frame(editor)
-        tabs.grid(row=0,column=0,sticky='ew',pady=(0,px(14)))
-        self.apps_tab = ttk.Button(tabs,text='Applications',style='Selected.Tab.TButton',command=lambda:self.switch_tab('apps'))
-        self.apps_tab.pack(side='left')
-        self.sites_tab = ttk.Button(tabs,text='Websites',style='Tab.TButton',command=lambda:self.switch_tab('sites'))
-        self.sites_tab.pack(side='left',padx=(px(8),0))
-        self.pages = {}
-        for name in ('apps','sites'):
-            page = ttk.Frame(editor)
-            page.grid(row=1,column=0,sticky='nsew')
-            page.columnconfigure(0,weight=1)
-            page.rowconfigure(1,weight=1)
-            self.pages[name] = page
-        apps,sites = self.pages['apps'],self.pages['sites']
-        self.selection_summary = tk.StringVar(value='Choose what belongs in this session.')
-        ttk.Label(apps,textvariable=self.selection_summary,style='Muted.TLabel').grid(row=0,column=0,sticky='w',pady=(0,px(10)))
-        table_card = Surface(apps,padding=8)
-        table_card.grid(row=1,column=0,sticky='nsew')
-        table = table_card.body
-        table.rowconfigure(0,weight=1)
-        table.columnconfigure(0,weight=1)
-        self.tree = SwitchTree(table,columns=('enabled','name','path','status','delete'),displaycolumns=('name','status','delete'),selectmode='extended',height=1)
-        for column,title,width in (('name','APPLICATION',250),('status','STATUS',100)):
-            self.tree.heading(column,text=title,anchor='w')
-            self.tree.column(column,width=px(width),minwidth=px(70),stretch=column=='name')
-        self.tree.heading('delete', text='')
-        self.tree.column('delete', width=px(36), minwidth=px(36), stretch=False, anchor='center')
-        self.tree.grid(row=0,column=0,sticky='nsew')
-        scroll = ttk.Scrollbar(table,orient='vertical',command=self.tree.yview)
-        scroll.grid(row=0,column=1,sticky='ns')
-        self.tree.configure(yscrollcommand=scroll.set)
-        self.tree.bind('<<TreeviewSelect>>',self.selection_changed)
-        self.tree.bind('<Delete>',lambda event:self.remove())
-        self.tree.bind('<Button-1>',self.toggle_clicked)
-        self.tree.bind('<space>',self.space_apps)
-        self.tree.bind('<Control-a>',self.select_all_apps)
-        self.apps_empty = ttk.Label(table,text='Find your distractions.\n\nUse Find apps to build your list.',style='CardMuted.TLabel',justify='center')
-        self.selected_path = tk.StringVar(value='Select an app to see its executable path.')
-        ttk.Entry(apps,textvariable=self.selected_path,state='readonly').grid(row=2,column=0,sticky='ew',pady=(px(10),px(12)))
-        actions = ttk.Frame(apps)
-        actions.grid(row=3,column=0,sticky='ew')
-        self.find_button = ttk.Button(actions,text='Find apps',style='Accent.TButton',command=self.find_apps)
-        self.find_button.pack(side='left')
-        self.add_button = ttk.Button(actions,text='Browse .exe',command=self.add)
-        self.add_button.pack(side='left',padx=px(6))
-        ttk.Label(sites,text='Choose domains. Subdomains are included.',style='Muted.TLabel').grid(row=0,column=0,sticky='w',pady=(0,px(10)))
-        site_card = Surface(sites,padding=8)
-        site_card.grid(row=1,column=0,sticky='nsew')
-        site_table = site_card.body
-        site_table.rowconfigure(0,weight=1)
-        site_table.columnconfigure(0,weight=1)
-        self.site_list = SwitchTree(site_table,columns=('domain','status','delete'),selectmode='extended',height=1)
-        self.site_list.heading('domain',text='WEBSITE',anchor='w')
-        self.site_list.heading('status',text='SESSION',anchor='w')
-        self.site_list.column('domain',width=px(240),minwidth=px(150),stretch=True)
-        self.site_list.column('status',width=px(110),minwidth=px(95),stretch=False)
-        self.site_list.heading('delete', text='')
-        self.site_list.column('delete', width=px(36), minwidth=px(36), stretch=False, anchor='center')
-        self.site_list.grid(row=0,column=0,sticky='nsew')
-        site_scroll = ttk.Scrollbar(site_table,orient='vertical',command=self.site_list.yview)
-        site_scroll.grid(row=0,column=1,sticky='ns')
-        self.site_list.configure(yscrollcommand=site_scroll.set)
-        self.sites_empty = ttk.Label(site_table,text='A quieter browser starts here.\n\nAdd a domain, such as youtube.com.',style='CardMuted.TLabel',justify='center')
-        ttk.Label(sites,text='Click a switch or select rows and press Space.',style='Muted.TLabel').grid(row=2,column=0,sticky='w',pady=(px(18),px(20)))
-        actions = ttk.Frame(sites)
-        actions.grid(row=3,column=0,sticky='ew')
-        self.site_add = ttk.Button(actions,text='Add website',style='Accent.TButton',command=self.add_website)
-        self.site_add.pack(side='left')
-        self.site_list.bind('<Button-1>',self.site_toggle_clicked)
-        self.site_list.bind('<space>',self.space_sites)
-        self.site_list.bind('<Delete>',lambda event:self.remove_website())
-        self.site_list.bind('<<TreeviewSelect>>',self.selection_changed)
-        panel_card = Surface(body,padding=20)
-        panel_card.grid(row=0,column=1,sticky='nsew')
-        panel = panel_card.body
-        panel.columnconfigure(0,weight=1,minsize=px(265))
-        panel.rowconfigure(7,weight=1,minsize=px(62))
-        self.banner = tk.StringVar(value='CHECKING SESSION')
-        self.banner_label = ttk.Label(panel,textvariable=self.banner,style='Status.TLabel',wraplength=px(265))
-        self.banner_label.grid(row=0,column=0,sticky='w')
-        self.clock_caption = tk.StringVar(value='TIME REMAINING')
-        ttk.Label(panel,textvariable=self.clock_caption,style='CardMuted.TLabel').grid(row=1,column=0,sticky='w',pady=(px(12),px(4)))
-        self.timer = tk.StringVar(value='--:--:--')
-        self.timer_label = ttk.Label(panel,textvariable=self.timer,style='Timer.TLabel')
-        self.timer_label.grid(row=2,column=0,sticky='w',pady=(0,px(8)))
-        self.progress = ProgressLine(panel)
-        self.progress.grid(row=3,column=0,sticky='ew',pady=(0,px(16)))
-        ttk.Label(panel,text='Session length / minutes',style='CardMuted.TLabel').grid(row=4,column=0,sticky='w')
-        self.duration = tk.StringVar(value='25')
-        self.duration_box = ttk.Combobox(panel,textvariable=self.duration,font=fonts['body'],
-                                       values=('1','15','25','50','90','Until restart'),width=12)
-        self.duration_box.grid(row=5,column=0,sticky='ew',pady=(px(7),px(8)))
-        self.start_button = ttk.Button(panel,text='START FOCUS MODE',style='Card.Accent.TButton',command=self.start)
-        self.start_button.grid(row=6,column=0,sticky='ew',pady=(px(8),px(14)))
-        self.status = tk.StringVar()
-        area = ttk.Frame(panel,style='Card.TFrame')
-        area.grid(row=7,column=0,sticky='nsew')
-        self.status_text = tk.Text(area,height=3,width=26,wrap='word',bg=c['card'],fg=c['muted'],relief='flat',borderwidth=0,
-                                   highlightthickness=0,state='disabled',font=fonts['body'])
-        status_scroll = ttk.Scrollbar(area,orient='vertical',command=self.status_text.yview)
-        status_scroll.pack(side='right',fill='y')
-        self.status_text.configure(yscrollcommand=status_scroll.set)
-        self.status_text.pack(side='left',fill='both',expand=True)
-        self._last_status = None
-        self.status.trace_add('write',self.render_status)
-        ttk.Separator(panel).grid(row=8,column=0,sticky='ew',pady=px(9))
-        self.exit_hint = tk.StringVar(value='Unlocks when your timer ends.\nRestart your PC for an early exit.')
-        ttk.Label(panel,textvariable=self.exit_hint,style='CardMuted.TLabel').grid(row=9,column=0,sticky='w')
+        body.grid(row=1, column=0, sticky='nsew')
+        body.rowconfigure(0, weight=1)
+        body.columnconfigure(0, weight=1)
+        self._build_editor(body)
+        self._build_timer(body)
         footer = ttk.Frame(outer)
-        footer.grid(row=2,column=0,sticky='ew',pady=(px(18),0))
-        footer.columnconfigure(0,weight=1)
-        self.connection_text = tk.StringVar(value='Browser connection: checking…')
-        ttk.Label(footer,textvariable=self.connection_text,style='Muted.TLabel').grid(row=0,column=0,sticky='w')
-        ttk.Label(footer,text=f'v{VERSION}',style='Muted.TLabel').grid(row=0,column=1,padx=px(16))
-        self.surfaces = [table_card,site_card,panel_card]
-        self.duration.trace_add('write',self.preview_duration)
+        footer.grid(row=2, column=0, sticky='ew', pady=(px(17), 0))
+        footer.columnconfigure(0, weight=1)
+        self.connection_text = tk.StringVar(value='Checking browser connection…')
+        ttk.Label(footer, textvariable=self.connection_text, style='Muted.TLabel').grid(row=0, column=0, sticky='w')
+        ttk.Label(footer, text=f'v{VERSION}', style='Muted.TLabel').grid(row=0, column=1)
+        self.duration.trace_add('write', self.preview_duration)
+        self.apps_query.trace_add('write', lambda *_: self.refresh(self._active_snapshot))
+        self.sites_query.trace_add('write', lambda *_: self.refresh_sites(self._active_sites))
         self.switch_tab('apps')
         self.refresh()
         self.refresh_sites()
         self.tray = TrayController()
-        self.root.protocol('WM_DELETE_WINDOW',self.hide_to_tray)
-        self.root.bind('<Button-1>', self.clear_background_selection, add='+')
-        for tree in (self.tree, self.site_list):
-            tree.bind('<Motion>', self.row_cursor)
-            tree.bind('<Leave>', lambda event: event.widget.configure(cursor=''))
+        root.protocol('WM_DELETE_WINDOW', self.hide_to_tray)
+        root.bind('<Button-1>', self.clear_background_selection, add='+')
+        root.bind('<Control-f>', self.focus_search)
         self.poll()
         self.pump_tray()
 
-    def change_theme(self,event=None):
-        name = self.theme_name.get()
-        try:
-            save_theme(name,self.store.path)
-        except (OSError,ValueError) as exc:
-            self.theme_name.set(self.root.staylocked_theme)
-            messagebox.showerror('Could not save appearance',str(exc),parent=self.root)
-            return
-        apply_theme(self.root,name)
+    def _build_editor(self, body):
+        px = self.px
+        editor = ttk.Frame(body)
+        editor.grid(row=0, column=0, sticky='nsew', padx=(0, px(22)))
+        editor.columnconfigure(0, weight=1)
+        editor.rowconfigure(3, weight=1)
+        ttk.Label(editor, text='Distractions', style='Heading.TLabel').grid(row=0, column=0, sticky='w')
+        ttk.Label(editor, text='Choose what to pause during your session.', style='Muted.TLabel').grid(row=1, column=0, sticky='w', pady=(px(5), px(18)))
+        tabs = ttk.Frame(editor)
+        tabs.grid(row=2, column=0, sticky='ew', pady=(0, px(15)))
+        self.apps_tab = ttk.Button(tabs, text='Applications', style='Selected.Tab.TButton', command=lambda: self.switch_tab('apps'))
+        self.apps_tab.pack(side='left')
+        self.sites_tab = ttk.Button(tabs, text='Websites', style='Tab.TButton', command=lambda: self.switch_tab('sites'))
+        self.sites_tab.pack(side='left', padx=(px(7), 0))
+        self.pages, self.search_entries = {}, {}
+        self.apps_query, self.sites_query = tk.StringVar(), tk.StringVar()
+        self.selection_summary, self.site_summary = tk.StringVar(), tk.StringVar()
+        self.selected_path = tk.StringVar(value='Only enabled apps will be blocked.')
+        for name in ('apps', 'sites'):
+            page = ttk.Frame(editor)
+            page.grid(row=3, column=0, sticky='nsew')
+            page.rowconfigure(0, weight=1)
+            page.columnconfigure(0, weight=1)
+            self.pages[name] = page
+            card = Surface(page, padding=14)
+            card.grid(row=0, column=0, sticky='nsew')
+            self.surfaces.append(card)
+            table = card.body
+            table.columnconfigure(0, weight=1)
+            table.rowconfigure(2, weight=1)
+            search = ttk.Frame(table, style='Card.TFrame')
+            search.grid(row=0, column=0, sticky='ew', pady=(0, px(12)))
+            search.columnconfigure(1, weight=1)
+            ttk.Label(search, text='Search', style='CardMuted.TLabel').grid(row=0, column=0, padx=(0, px(9)))
+            query = self.apps_query if name == 'apps' else self.sites_query
+            entry = ttk.Entry(search, textvariable=query, width=1)
+            entry.grid(row=0, column=1, sticky='ew')
+            from .website_dialog import control_key, paste_text
+            entry.bind('<Control-KeyPress>', lambda event, widget=entry: control_key(event, widget))
+            entry.bind('<<Paste>>', lambda event, widget=entry: paste_text(widget))
+            entry.bind('<Escape>', lambda event, variable=query: variable.set(''))
+            self.search_entries[name] = entry
+            ttk.Label(search, textvariable=self.selection_summary if name == 'apps' else self.site_summary,
+                      style='CardMuted.TLabel').grid(row=0, column=2, padx=(px(12), 0))
+            ttk.Separator(table).grid(row=1, column=0, sticky='ew')
+            targets = TargetList(table, self.toggle_apps if name == 'apps' else self.toggle_sites,
+                                 self.remove if name == 'apps' else self.remove_website)
+            targets.grid(row=2, column=0, sticky='nsew')
+            targets.bind('<space>', self.space_apps if name == 'apps' else self.space_sites)
+            targets.bind('<Delete>', lambda event, kind=name: self.remove() if kind == 'apps' else self.remove_website())
+            targets.bind('<<TreeviewSelect>>', self.selection_changed)
+            empty = ttk.Label(targets.canvas, style='CardMuted.TLabel', justify='center', wraplength=px(310))
+            ttk.Separator(table).grid(row=3, column=0, sticky='ew', pady=(px(4), px(10)))
+            if name == 'apps':
+                self.tree, self.apps_empty = targets, empty
+                self.path_details = ttk.Label(table, textvariable=self.selected_path, style='CardMuted.TLabel', width=1, anchor='w')
+                self.path_details.grid(row=4, column=0, sticky='ew')
+            else:
+                self.site_list, self.sites_empty = targets, empty
+                ttk.Label(table, text='Domains and their subdomains are included.', style='CardMuted.TLabel').grid(row=4, column=0, sticky='w')
+            actions = ttk.Frame(page)
+            actions.grid(row=1, column=0, sticky='ew', pady=(px(13), 0))
+            if name == 'apps':
+                self.find_button = ttk.Button(actions, text='+  Find apps', command=self.find_apps)
+                self.find_button.pack(side='left')
+                self.add_button = ttk.Button(actions, text='Browse .exe', command=self.add)
+                self.add_button.pack(side='left', padx=(px(8), 0))
+            else:
+                self.site_add = ttk.Button(actions, text='+  Add website', command=self.add_website)
+                self.site_add.pack(side='left')
+        note = Surface(editor, padding=15)
+        note.grid(row=4, column=0, sticky='ew', pady=(px(16), 0))
+        self.surfaces.append(note)
+        note.body.columnconfigure(0, weight=1)
+        ttk.Label(note.body, text='Your focus, protected', style='Card.Strong.TLabel').grid(row=0, column=0, sticky='w')
+        hint = ttk.Label(note.body, text='Your selection stays blocked until the session ends.', style='CardMuted.TLabel')
+        hint.grid(row=1, column=0, sticky='w', pady=(px(5), 0))
+        note.body.bind('<Configure>', lambda e: hint.configure(wraplength=max(px(150), e.width - px(5))))
+
+    def _build_timer(self, body):
+        px, c, fonts = self.px, palette(self.root), self.root.focuslock_fonts
+        card = Surface(body, padding=20)
+        card.grid(row=0, column=1, sticky='nsew')
+        self.surfaces.append(card)
+        panel = card.body
+        panel.columnconfigure(0, weight=1, minsize=px(290))
+        panel.rowconfigure(1, weight=1, minsize=px(52))
+        self.banner = tk.StringVar(value='Checking session…')
+        self.banner_label = ttk.Label(panel, textvariable=self.banner, style='Status.TLabel', wraplength=px(290))
+        self.banner_label.grid(row=0, column=0, sticky='w')
+        self.clock_caption = tk.StringVar(value='TIME REMAINING')
+        self.timer = tk.StringVar(value='--:--:--')
+        self.progress = TimerRing(panel, self.timer, self.clock_caption)
+        self.progress.grid(row=1, column=0, sticky='nsew', pady=(px(7), px(9)))
+        self.timer_label = self.progress.label
+        ttk.Label(panel, text='Session duration', style='Card.Strong.TLabel').grid(row=2, column=0, sticky='w', pady=(0, px(9)))
+        presets = ttk.Frame(panel, style='Card.TFrame')
+        presets.grid(row=3, column=0, sticky='ew')
+        self.preset_buttons = {}
+        for index, minutes in enumerate((25, 45, 60)):
+            presets.columnconfigure(index, weight=1, uniform='presets')
+            button = ttk.Button(presets, text=f'{minutes} min', style='Card.Chip.TButton',
+                                command=lambda value=minutes: self.choose_duration(value))
+            button.grid(row=0, column=index, sticky='ew', padx=(0 if index == 0 else px(6), 0))
+            self.preset_buttons[minutes] = button
+        custom = ttk.Frame(panel, style='Card.TFrame')
+        custom.grid(row=4, column=0, sticky='ew', pady=(px(10), px(3)))
+        custom.columnconfigure(0, weight=1)
+        ttk.Label(custom, text='Minutes · 1–720', style='CardMuted.TLabel').grid(row=0, column=0, sticky='w')
+        self.duration = tk.StringVar(value='25')
+        self.duration_box = ttk.Combobox(custom, textvariable=self.duration, font=fonts['body'],
+                                       values=('15', '25', '45', '60', '90', 'Until restart'), width=13)
+        self.duration_box.grid(row=0, column=1, sticky='e', padx=(px(8), 0))
+        self.start_button = ttk.Button(panel, text='Start focus session', style='Card.Accent.TButton', command=self.start)
+        self.start_button.grid(row=5, column=0, sticky='ew', pady=(px(16), px(12)))
+        self.status = tk.StringVar()
+        area = ttk.Frame(panel, style='Card.TFrame')
+        area.grid(row=6, column=0, sticky='ew')
+        area.columnconfigure(0, weight=1)
+        area.rowconfigure(0, weight=1)
+        self.status_text = tk.Text(area, height=3, width=1, wrap='word', bg=c['card'], fg=c['muted'], relief='flat', borderwidth=0,
+                                   highlightthickness=0, state='disabled', font=fonts['small'], cursor='arrow', padx=0, pady=0)
+        self.status_text.grid(row=0, column=0, sticky='nsew')
+        scroll = AutoScrollbar(area, orient='vertical', command=self.status_text.yview)
+        scroll.grid(row=0, column=1, sticky='ns')
+        self.status_text.configure(yscrollcommand=scroll.set)
+        self._last_status = None
+        self.status.trace_add('write', self.render_status)
+        ttk.Separator(panel).grid(row=7, column=0, sticky='ew', pady=px(12))
+        self.exit_hint = tk.StringVar(value='Apps unlock when your timer ends.\nRestart your PC for an early exit.')
+        hint = ttk.Label(panel, textvariable=self.exit_hint, style='CardMuted.TLabel', wraplength=px(290))
+        hint.grid(row=8, column=0, sticky='w')
+        panel.bind('<Configure>', lambda e: hint.configure(wraplength=max(px(150), e.width)))
+
+    def focus_search(self, event=None):
+        self.search_entries[self.current_tab].focus_set()
+        return 'break'
+
+    def choose_duration(self, minutes):
+        if not self.busy:
+            self.duration.set(str(minutes))
+
+    def update_counts(self):
+        apps = self._active_snapshot if self._active_snapshot is not None else self.applications
+        sites = self._active_sites if self._active_sites is not None else self.websites
+        self.apps_tab.configure(text=f'Applications  {len(apps)}')
+        self.sites_tab.configure(text=f'Websites  {len(sites)}')
+        self.selection_summary.set(f'{len(apps) if self.busy else len(self.enabled_apps())} selected')
+        self.site_summary.set(f'{len(sites) if self.busy else len(self.enabled_sites())} selected')
+
+    def _apply_appearance(self, values):
+        apply_theme(self.root, values['theme'], values)
+        self.theme_name.set(values['theme'])
         c = palette(self.root)
-        self.status_text.configure(bg=c['card'],fg=c['muted'])
+        self.status_text.configure(bg=c['card'], fg=c['muted'])
         self.tree.repaint()
         self.site_list.repaint()
         self.progress.repaint()
         for surface in self.surfaces:
             surface.repaint()
+        # Executable icons have the current card background baked into their bitmap.
+        for widget, website in ((self.tree, False), (self.site_list, True)):
+            for item in widget.rows.values():
+                values = item['values']
+                key = values[0] if website else values[2]
+                title = values[0] if website else values[1]
+                icon = self.icons.get(key, title, website=website)
+                item['image'] = icon
+                item['icon'].configure(image=icon)
+
+    def save_appearance(self, values):
+        self.appearance = save_appearance(values, self.store.path)
+        self._apply_appearance(self.appearance)
+
+    def change_theme(self, event=None):
+        try:
+            self.save_appearance({'theme': self.theme_name.get()})
+        except (OSError, ValueError) as exc:
+            self.theme_name.set(self.appearance['theme'])
+            messagebox.showerror('Could not save appearance', str(exc), parent=self.root)
+
+    def open_appearance(self):
+        from .appearance_dialog import AppearanceDialog
+        if self.appearance_dialog and self.appearance_dialog.winfo_exists():
+            self.appearance_dialog.lift()
+            return
+        self.appearance_dialog = AppearanceDialog(self.root, self.appearance, self._apply_appearance, self.save_appearance)
 
     def find_apps(self):
         if self.busy:
@@ -235,33 +294,14 @@ class FocusLockWindow:
         return self.commit([*self.applications,*new]) if new else True
 
     def clear_background_selection(self, event):
+        widget = event.widget
+        while widget is not None:
+            if widget in (self.tree, self.site_list):
+                return
+            widget = widget.master
         if event.widget.winfo_class() in {'TFrame', 'Frame', 'Canvas', 'TLabel'}:
             for tree in (self.tree, self.site_list):
                 tree.selection_remove(*tree.selection())
-
-    def row_cursor(self, event):
-        tree = event.widget
-        actionable = (not self.busy and tree.identify_row(event.y)
-                      and tree.identify_column(event.x) in {'#0', '#3'})
-        tree.configure(cursor='hand2' if actionable else '')
-
-    def list_clicked(self, tree, event, toggle, remove):
-        row = tree.identify_row(event.y)
-        if not row:
-            tree.selection_remove(*tree.selection())
-            return 'break'
-        if self.busy:
-            return None
-        column = tree.identify_column(event.x)
-        if column == '#0':
-            toggle([row])
-            return 'break'
-        if column == '#3':
-            remove([row])
-            return 'break'
-
-    def site_toggle_clicked(self, event):
-        return self.list_clicked(self.site_list, event, self.toggle_sites, self.remove_website)
 
     def switch_tab(self, name):
         self.current_tab = name
@@ -290,21 +330,29 @@ class FocusLockWindow:
         self.toggle_sites()
         return 'break'
 
-    def select_all_apps(self, event=None):
-        self.tree.selection_set(self.tree.get_children())
-        return 'break'
-
     def refresh_sites(self,items=None):
+        self._active_sites = items
+        selected = {self.site_list.item(i, 'values')[0] for i in self.site_list.selection()}
+        view = self.site_list.canvas.yview()[0]
         self.site_list.clear()
+        query = self.sites_query.get().strip().casefold()
         for index,domain in enumerate(self.websites if items is None else items):
+            if query and query not in domain.casefold():
+                continue
             enabled = items is not None or domain not in self.disabled_sites
-            self.site_list.insert_switch(index,(domain,'Included' if enabled else 'Skipped', '' if items is not None else '×'),enabled)
+            self.site_list.insert_target(index,(domain,'Included' if enabled else 'Skipped', '' if items is not None else '×'),
+                                         domain, 'Includes subdomains' if enabled else 'Not in this session', enabled,
+                                         self.icons.get(domain, domain, website=True), removable=items is None)
+        self.site_list.selection_set([i for i in self.site_list.get_children() if self.site_list.item(i, 'values')[0] in selected])
+        self.site_list.canvas.yview_moveto(view)
         if self.site_list.get_children():
             self.sites_empty.place_forget()
         else:
-            self.sites_empty.configure(text='No websites in this session.' if items is not None else
-                                       'A quieter browser starts here.\n\nAdd a domain, such as youtube.com.')
+            self.sites_empty.configure(text='No matching websites.\nTry another search.' if query else
+                                       'No websites in this session.' if items is not None else
+                                       'A quieter browser starts here.\n\nAdd a website to build your list.')
             self.sites_empty.place(relx=.5,rely=.5,anchor='center')
+        self.update_counts()
 
     def open_extension_setup(self):
         try:
@@ -319,18 +367,27 @@ class FocusLockWindow:
             values = self.tree.item(self.tree.selection()[0], 'values')
             self.selected_path.set(values[2])
         else:
-            self.selected_path.set('Select an app to see its executable path.')
+            self.selected_path.set('Only enabled apps will be blocked.')
 
     def controls(self, busy):
         self.busy = busy
         self.add_button.configure(state='disabled' if busy else 'normal')
         self.find_button.configure(state='disabled' if busy else 'normal')
-        self.start_button.configure(state='disabled' if busy or self.service_missing or not (self.enabled_apps() or self.enabled_sites()) else 'normal',
-                                    text=('SESSION ACTIVE' if self.display_session else 'PLEASE WAIT…') if busy else 'START FOCUS MODE')
+        try:
+            self.session_minutes()
+            valid_duration = True
+        except ValueError:
+            valid_duration = False
+        self.start_button.configure(state='disabled' if busy or self.service_missing or not valid_duration or not (self.enabled_apps() or self.enabled_sites()) else 'normal',
+                                    text=('Session active' if self.display_session else 'Please wait…') if busy else 'Start focus session')
         self.site_add.configure(state='disabled' if busy else 'normal')
         self.duration_box.configure(state='disabled' if busy else 'normal')
-        if not busy:
-            self.selection_summary.set(f'Apps enabled: {len(self.enabled_apps())}   ·   Websites enabled: {len(self.enabled_sites())}')
+        for minutes, button in self.preset_buttons.items():
+            button.configure(state='disabled' if busy else 'normal',
+                             style='Card.Selected.Chip.TButton' if self.duration.get() == str(minutes) else 'Card.Chip.TButton')
+        self.tree.set_locked(busy)
+        self.site_list.set_locked(busy)
+        self.update_counts()
         self.selection_changed()
 
     def session_minutes(self):
@@ -346,11 +403,15 @@ class FocusLockWindow:
         except ValueError:
             self.clock_caption.set('TIME REMAINING')
             self.timer.set('--:--:--')
+            if hasattr(self, 'start_button'):
+                self.controls(False)
             return
         self.clock_caption.set('TIME IN FOCUS' if minutes is None else 'TIME REMAINING')
         self.timer.set('00:00:00' if minutes is None else format_remaining(minutes * 60))
         self.exit_hint.set('Restart Windows to end this session.\nClosing the app keeps it running.' if minutes is None else
                            'Unlocks when your timer ends.\nRestart your PC for an early exit.')
+        if hasattr(self, 'start_button'):
+            self.controls(False)
 
     def save_websites(self, candidate):
         try:
@@ -383,19 +444,34 @@ class FocusLockWindow:
             self.save_websites([d for i, d in enumerate(self.websites) if i not in selected])
 
     def refresh(self,items=None):
+        self._active_snapshot = items
+        selected = {path_key(self.tree.item(i, 'values')[2]) for i in self.tree.selection()}
+        view = self.tree.canvas.yview()[0]
         self.tree.clear()
+        query = self.apps_query.get().strip().casefold()
         for index,path in enumerate(self.applications if items is None else items):
             enabled = items is not None or path_key(path) not in self.disabled_apps
             name = ntpath.splitext(ntpath.basename(path))[0]
-            self.tree.insert_switch(index,('On' if enabled else 'Off',name,path,
-                'Ready' if Path(path).is_file() else 'Missing file', '' if items is not None else '×'),enabled)
+            if query and query not in (name + ' ' + path).casefold():
+                continue
+            exists = Path(path).is_file()
+            subtitle = 'Ready to block' if exists and enabled else 'Not in this session' if exists else 'File not found'
+            if items is not None:
+                subtitle = 'Blocked for this session'
+            self.tree.insert_target(index,('On' if enabled else 'Off',name,path,
+                'Ready' if exists else 'Missing file', '' if items is not None else '×'),
+                name, subtitle, enabled, self.icons.get(path, name), removable=items is None)
+        self.tree.selection_set([i for i in self.tree.get_children() if path_key(self.tree.item(i, 'values')[2]) in selected])
+        self.tree.canvas.yview_moveto(view)
         if self.tree.get_children():
             self.apps_empty.place_forget()
         else:
-            self.apps_empty.configure(text='No apps in this session.\n\nWebsite blocking is still active.' if items is not None else
+            self.apps_empty.configure(text='No matching applications.\nTry another search.' if query else
+                                      'No apps in this session.\n\nWebsite blocking is still active.' if items is not None else
                                       'Find your distractions.\n\nUse Find apps to build your list.')
             self.apps_empty.place(relx=.5,rely=.5,anchor='center')
         self.selection_changed()
+        self.update_counts()
 
     def commit(self, candidate):
         if self.busy:
@@ -470,9 +546,6 @@ class FocusLockWindow:
             disabled.difference_update(keys)
         self.save_toggles(disabled, set(self.disabled_sites))
 
-    def toggle_clicked(self, event):
-        return self.list_clicked(self.tree, event, self.toggle_apps, self.remove)
-
     def toggle_sites(self, indices=None):
         if self.busy:
             return
@@ -508,7 +581,7 @@ class FocusLockWindow:
                 return
             self.controls(True)
             self.pending = launch_session(applications, force_running=True, websites=websites, minutes=minutes)
-            self.banner.set('STARTING FOCUS MODE…')
+            self.banner.set('Starting focus session…')
             self.status.set('Checking running applications and acquiring files…')
         except Exception as exc:
             self.controls(False)
@@ -538,11 +611,11 @@ class FocusLockWindow:
                                       if state.get('mode') == 'timed' else 'Until restart')
                     self.refresh(state['applications'])
                     self.refresh_sites(state.get('websites', []))
-                    self.selection_summary.set('Session active · Your selection is locked.')
+                    self.update_counts()
                     if not state['applications'] and state.get('websites'):
                         self.switch_tab('sites')
-                self.banner.set('FOCUS MODE ACTIVE')
-                self.start_button.configure(text='SESSION ACTIVE')
+                self.banner.set('Focus session active')
+                self.start_button.configure(text='Session active')
                 timed = state.get('mode') == 'timed'
                 self.clock_caption.set('TIME REMAINING' if timed else 'TIME IN FOCUS')
                 self.timer.set(format_remaining(state.get('remaining_seconds', 0) if timed else state.get('elapsed_seconds', 0)))
@@ -561,7 +634,7 @@ class FocusLockWindow:
                     text += '\n' + state['website_warning']
                 self.status.set(text)
             elif kind == 'STARTING':
-                self.banner.set('PREPARING / FINISHING SESSION…')
+                self.banner.set('Preparing your session…')
                 self.timer.set('--:--:--')
                 self.status.set(state.get('message', 'Please wait. Applications are being checked.'))
             else:
@@ -569,7 +642,7 @@ class FocusLockWindow:
                     self.display_session = None
                     self.refresh()
                     self.refresh_sites()
-                self.banner.set('SESSION COMPLETE' if kind == 'ENDED' else 'READY TO FOCUS')
+                self.banner.set('Session complete' if kind == 'ENDED' else 'Ready to focus')
                 if kind == 'ENDED' and not self._preview_after_end:
                     self.timer.set('00:00:00')
                     self.progress.set(100)
@@ -583,12 +656,12 @@ class FocusLockWindow:
                     'SERVICE_MISSING': state.get('message', 'Install the Windows service using the installer.'),
                 }
                 if kind == 'SERVICE_MISSING':
-                    self.banner.set('INSTALL SERVICE TO START')
+                    self.banner.set('Install service to start')
                     self.start_button.configure(state='disabled')
                 self.status.set(messages.get(kind, 'Choose what to pause and a session length. Only switched-on items will be blocked.'))
         except Exception as exc:
             self.controls(True)
-            self.banner.set('CANNOT READ SESSION STATUS')
+            self.banner.set('Session status unavailable')
             self.status.set(str(exc))
         finally:
             if not self.shutting_down:
