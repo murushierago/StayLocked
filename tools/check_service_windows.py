@@ -43,6 +43,8 @@ def exercise():
     with tempfile.TemporaryDirectory(prefix='StayLocked-probe-') as folder:
         probe = Path(folder) / 'StayLockedProbe.exe'
         shutil.copyfile(Path(os.environ['SystemRoot']) / 'System32' / 'where.exe', probe)
+        # TEMP can use an 8.3 alias (RUNNER~1); the service resolves to the long path.
+        probe = probe.resolve()
         original = probe.read_bytes()
         requested = None
         try:
@@ -53,10 +55,10 @@ def exercise():
                                        capture_output=True, text=True, check=True, timeout=20)
             requested = json.loads(completed.stdout.strip())
             state = wait_state('ACTIVE')
-            assert state['session_id'] == requested
-            assert state['applications'] == [str(probe)]
-            assert state['mode'] == 'timed'
-            assert 0 < state['remaining_seconds'] <= 60
+            assert state['session_id'] == requested, ('Session ID', state, requested)
+            assert [os.path.normcase(p) for p in state['applications']] == [os.path.normcase(str(probe))], ('Probe path', state['applications'], str(probe))
+            assert state['mode'] == 'timed', state
+            assert 0 < state['remaining_seconds'] <= 60, state
             try:
                 probe.read_bytes()
             except PermissionError:
@@ -78,7 +80,9 @@ def exercise():
                 try:
                     s.ControlService(service, s.SERVICE_CONTROL_STOP)
                 except pywintypes.error as exc:
-                    assert exc.winerror == 1061, exc
+                    # Running without STOP acceptance is 1052; transitions may
+                    # instead report 1061. Neither may release the active lock.
+                    assert exc.winerror in (1052, 1061), exc
                 else:
                     raise AssertionError('SCM accepted STOP during an active session')
                 assert client.read_state()['session_id'] == requested
@@ -139,5 +143,7 @@ if __name__ == '__main__':
     try:
         main()
     except Exception as exc:
+        import traceback
+        traceback.print_exc()
         print(f'CHECK FAILED: {exc}', file=sys.stderr)
         raise SystemExit(1)
