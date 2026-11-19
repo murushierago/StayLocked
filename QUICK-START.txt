@@ -1,0 +1,32 @@
+StayLocked 0.6.1 - timer restored and service IPC fix
+
+BUILD AND INSTALL
+1. Restart Windows to finish any old session. Close the old interface and browsers.
+2. Extract into a fresh folder. Run Build-Installer.cmd.
+3. Run release\StayLocked-Setup-0.6.1-x64.exe and accept UAC.
+4. Open the installed StayLocked from Start. Click Browser setup.
+The build computer needs Python x64 (3.12–3.14) and Inno Setup 6.3+ or 7.
+The recipient needs only the installer. A loose EXE cannot update the service.
+Replacing only the GUI will NOT fix the old service's CancelIoEx error.
+
+BROWSERS
+Opera: opera://extensions | Chrome: chrome://extensions
+Edge: edge://extensions | Yandex: browser://extensions
+Enable Developer mode, Load unpacked, select the installed extension folder.
+Firefox 140+: about:debugging#/runtime/this-firefox -> Load Temporary Add-on
+Select extension-firefox\manifest.json. Grant website access if prompted.
+Firefox test add-on must be loaded again after Firefox closes; permanent
+installation needs Mozilla signing, which is not included in this release.
+
+USE
+Find apps or Browse .exe. Add websites. Use the per-row switches to include items.
+Click a row's × to remove it. Click empty space to clear the highlight.
+Start Focus Mode asks before forcibly closing selected running apps: save work first.
+Choose 1-720 minutes (default 25). The service counts down and unlocks on expiry.
+Restart Windows for an early exit. Optional "Until restart" has no timer.
+X hides the interface to the tray. Ending StayLocked.exe does not stop the service.
+The service is visible as StayLocked Focus Service / StayLockedService.exe.
+An elevated administrator can still stop it. Task Manager and recovery stay usable.
+
+Settings remain at %LOCALAPPDATA%\FocusLock. No browser profile is reset.
+See README.md and VERIFICATION-0.6.1.md in the source archive for tests/limitations.
